@@ -59,6 +59,10 @@ class BillingService:
         remaining = max(self._free_daily_messages - new_used, 0)
         return QuotaResult(allowed=True, is_premium=False, remaining_free_messages=remaining)
 
+    async def is_premium(self, telegram_user_id: int) -> bool:
+        user = await self._db.get_or_create_user(telegram_user_id)
+        return _is_premium_active(user)
+
     async def refund(self, telegram_user_id: int) -> None:
         """Devuelve un mensaje a la cuota gratuita del usuario.
 

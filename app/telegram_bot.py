@@ -133,6 +133,15 @@ def build_application(
 
         user_id = update.effective_user.id
 
+        # Nunca ofrecer pagar a quien ya pagó: cobrarle dos veces sería un
+        # problema serio, no una molestia.
+        if await billing.is_premium(user_id):
+            await update.message.reply_text(
+                "✨ Ya tienes el plan Premium activo, no necesitas pagar de nuevo.\n"
+                "Usa /estado para ver hasta cuándo."
+            )
+            return
+
         # Telegram Stars es el método preferido: se paga dentro de Telegram,
         # sin salir a un navegador ni necesitar cuenta de comercio.
         if stars_service.enabled:

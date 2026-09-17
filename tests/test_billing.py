@@ -122,3 +122,25 @@ async def test_refund_no_deja_el_contador_en_negativo(db):
 async def test_refund_sin_facturacion_no_hace_nada(db):
     billing = BillingService(db, free_daily_messages=2, billing_enabled=False)
     await billing.refund(999)  # no debe fallar aunque el usuario no exista
+
+
+@pytest.mark.asyncio
+async def test_is_premium_detecta_suscripcion_activa(db):
+    """Se usa para no ofrecerle pagar de nuevo a quien ya pagó."""
+    billing = BillingService(db, free_daily_messages=1, billing_enabled=True)
+    await db.get_or_create_user(1)
+    assert not await billing.is_premium(1)
+
+    futuro = (dt.datetime.now(dt.UTC) + dt.timedelta(days=5)).isoformat()
+    await db.set_premium(1, is_premium=True, premium_until=futuro)
+    assert await billing.is_premium(1)
+
+
+@pytest.mark.asyncio
+async def test_is_premium_es_falso_si_la_suscripcion_expiro(db):
+    billing = BillingService(db, free_daily_messages=1, billing_enabled=True)
+    await db.get_or_create_user(2)
+    pasado = (dt.datetime.now(dt.UTC) - dt.timedelta(days=1)).isoformat()
+    await db.set_premium(2, is_premium=True, premium_until=pasado)
+
+    assert not await billing.is_premium(2)
