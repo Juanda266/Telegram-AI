@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 SIN_CUOTA = "sin_cuota"
 
+# Una consulta con varias búsquedas y lecturas puede tardar, pero pasados
+# unos minutos es que algo se quedó colgado.
+DEFAULT_TIMEOUT_SECONDS = 180.0
+
 MENSAJE_MODELOS_CAIDOS = (
     "⚠️ Ahora mismo no pude contactar con ningún modelo de IA "
     "(seguramente se agotó el cupo gratuito). Este mensaje no te cuenta: "
@@ -37,6 +41,11 @@ MENSAJE_SIN_VISION = (
     "⚠️ Ahora mismo no pude analizar la imagen (no hay modelos de visión "
     "gratuitos disponibles). Este mensaje no te cuenta; prueba de nuevo en "
     "unos minutos o descríbemela con palabras."
+)
+MENSAJE_TIMEOUT = (
+    "⏱️ La consulta está tardando demasiado y la cancelé para no dejarte "
+    "esperando. Este mensaje no te cuenta; prueba a preguntarlo de forma "
+    "más concreta."
 )
 MENSAJE_IMAGEN_NO_SOPORTADA = (
     "📎 Por ahora entiendo texto e imágenes. "
@@ -76,11 +85,13 @@ class Assistant:
         memory: ConversationMemory,
         billing: BillingService,
         vision: VisionService | None = None,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self._agent = agent
         self._memory = memory
         self._billing = billing
         self._vision = vision
+        self._timeout_seconds = timeout_seconds
         self._locks = _ConversationLocks()
 
     @property
@@ -145,7 +156,14 @@ class Assistant:
     ) -> AssistantReply:
         async with self._locks.acquire(str(conversation_id)):
             try:
-                respuesta = await producir()
+                # Sin tope, una petición colgada dejaría el lock tomado para
+                # siempre y la conversación entera quedaría muerta.
+                async with asyncio.timeout(self._timeout_seconds):
+                    respuesta = await producir()
+            except TimeoutError:
+                logger.warning("La respuesta tardó más de %ss", self._timeout_seconds)
+                await self._billing.refund(user_id)
+                return AssistantReply(text=MENSAJE_TIMEOUT)
             except AllModelsFailedError:
                 logger.exception("Ningún modelo pudo responder")
                 # El fallo es nuestro: no le gastamos la cuota al usuario.

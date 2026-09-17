@@ -204,3 +204,51 @@ def test_los_locks_son_independientes_entre_conversaciones():
     locks = _ConversationLocks()
     assert locks.acquire("1") is not locks.acquire("2")
     assert locks.acquire("1") is locks.acquire("1")
+
+
+@pytest.mark.asyncio
+async def test_una_respuesta_colgada_se_cancela(db):
+    """Sin tope, el lock de la conversación quedaría tomado para siempre y
+    ese chat dejaría de funcionar."""
+
+    class AgenteColgado:
+        async def run(self, history, user_message):
+            await asyncio.sleep(10)
+
+    assistant = Assistant(
+        agent=AgenteColgado(),
+        memory=ConversationMemory(db, max_messages=10),
+        billing=BillingService(db, 2, True),
+        timeout_seconds=0.05,
+    )
+
+    reply = await assistant.handle_text(1, 100, "hola")
+
+    assert "tardando demasiado" in reply.text
+    # La cuota se devolvió y la conversación sigue utilizable.
+    assert (await assistant.handle_text(1, 100, "otra")).text is not None
+
+
+@pytest.mark.asyncio
+async def test_tras_un_timeout_la_conversacion_sigue_viva(db):
+    class AgenteLento:
+        def __init__(self):
+            self.colgado = True
+
+        async def run(self, history, user_message):
+            if self.colgado:
+                await asyncio.sleep(10)
+            return "por fin"
+
+    agent = AgenteLento()
+    assistant = Assistant(
+        agent=agent,
+        memory=ConversationMemory(db, max_messages=10),
+        billing=BillingService(db, 5, True),
+        timeout_seconds=0.05,
+    )
+
+    await assistant.handle_text(1, 100, "hola")
+    agent.colgado = False
+
+    assert (await assistant.handle_text(1, 100, "otra")).text == "por fin"
