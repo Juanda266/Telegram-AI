@@ -1,0 +1,28 @@
+# Despliegue en Render (https://render.com) — tiene un plan gratuito.
+# El disco persistente es necesario para no perder las suscripciones
+# guardadas en SQLite cada vez que se redespliega.
+services:
+  - type: web
+    name: telegram-ai
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: BILLING_ENABLED
+        value: "false"
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+      - key: DATABASE_PATH
+        value: /app/data/bot.db

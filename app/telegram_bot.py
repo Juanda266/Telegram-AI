@@ -1,9 +1,10 @@
 import asyncio
+import contextlib
 import logging
 
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -35,8 +36,40 @@ WELCOME_MESSAGE = (
 )
 
 
+TYPING_REFRESH_SECONDS = 4
+
+
 def _is_authorized(settings: Settings, user_id: int) -> bool:
     return not settings.allowed_user_ids or user_id in settings.allowed_user_ids
+
+
+class ChatLocks:
+    """Un lock por chat, para serializar los mensajes de una misma conversación."""
+
+    def __init__(self) -> None:
+        self._locks: dict[int, asyncio.Lock] = {}
+
+    def acquire(self, chat_id: int) -> asyncio.Lock:
+        lock = self._locks.get(chat_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[chat_id] = lock
+        return lock
+
+
+async def _keep_typing(bot, chat_id: int) -> None:
+    """Mantiene el indicador de 'escribiendo...' mientras el agente investiga.
+
+    Telegram lo apaga solo a los ~5 segundos, y una búsqueda web puede tardar
+    bastante más; sin esto el usuario cree que el bot se colgó.
+    """
+    try:
+        while True:
+            with contextlib.suppress(TelegramError):
+                await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(TYPING_REFRESH_SECONDS)
+    except asyncio.CancelledError:
+        pass
 
 
 def build_application(
@@ -47,6 +80,7 @@ def build_application(
     stripe_service: StripeService,
 ) -> Application:
     application = Application.builder().token(settings.telegram_bot_token).build()
+    chat_locks = ChatLocks()
 
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(WELCOME_MESSAGE)
@@ -113,20 +147,26 @@ def build_application(
             return
 
         chat_id = update.effective_chat.id
-        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
-        history = memory.get(chat_id)
-        try:
-            reply_text = await agent.run(history, message.text)
-        except Exception:
-            logger.exception("Error inesperado procesando el mensaje")
-            reply_text = (
-                "⚠️ Ocurrió un error inesperado procesando tu mensaje. "
-                "Intenta de nuevo en unos momentos."
-            )
-        else:
-            memory.append(chat_id, {"role": "user", "content": message.text})
-            memory.append(chat_id, {"role": "assistant", "content": reply_text})
+        # Sin este lock, dos mensajes seguidos del mismo chat se procesarían
+        # en paralelo y ambos leerían el historial antes de que el otro lo
+        # actualice, perdiendo contexto y mezclando respuestas.
+        async with chat_locks.acquire(chat_id):
+            typing = asyncio.create_task(_keep_typing(context.bot, chat_id))
+            try:
+                history = memory.get(chat_id)
+                reply_text = await agent.run(history, message.text)
+            except Exception:
+                logger.exception("Error inesperado procesando el mensaje")
+                reply_text = (
+                    "⚠️ Ocurrió un error inesperado procesando tu mensaje. "
+                    "Intenta de nuevo en unos momentos."
+                )
+            else:
+                memory.append(chat_id, {"role": "user", "content": message.text})
+                memory.append(chat_id, {"role": "assistant", "content": reply_text})
+            finally:
+                typing.cancel()
 
         await _reply_safely(message, reply_text)
 
