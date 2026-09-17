@@ -10,6 +10,7 @@ from app.ai.rate_limiter import RateLimiter
 from app.billing.service import BillingService
 from app.config import configure_logging, load_settings
 from app.payments.stripe_client import StripeService
+from app.payments.telegram_stars import TelegramStarsService
 from app.payments.webhook_handler import WebhookHandler
 from app.payments.webhook_server import build_webhook_app, start_webhook_server
 from app.storage.db import Database
@@ -46,6 +47,10 @@ async def run() -> None:
         success_url=settings.billing.stripe_success_url,
         cancel_url=settings.billing.stripe_cancel_url,
     )
+    stars_service = TelegramStarsService(
+        price_stars=settings.billing.stars_price,
+        as_subscription=settings.billing.stars_as_subscription,
+    )
     billing = BillingService(
         db=db,
         free_daily_messages=settings.billing.free_daily_messages,
@@ -64,7 +69,9 @@ async def run() -> None:
     webhook_app = build_webhook_app(
         stripe_service, WebhookHandler(db=db, stripe_service=stripe_service)
     )
-    application = build_application(settings, agent, memory, billing, stripe_service, db)
+    application = build_application(
+        settings, agent, memory, billing, stripe_service, db, stars_service
+    )
 
     runner = await start_webhook_server(webhook_app, settings.http_port)
 

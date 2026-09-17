@@ -62,6 +62,8 @@ class BillingSettings:
     stripe_success_url: str
     stripe_cancel_url: str
     premium_price_label: str
+    stars_price: int
+    stars_as_subscription: bool
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,35 @@ class Settings:
     max_agent_steps: int = 6
     openrouter_requests_per_minute: int = 18
     log_level: str = "INFO"
+
+
+def _validar_metodos_de_pago(billing: "BillingSettings") -> None:
+    """Con la facturación activa hace falta al menos un método de pago
+    completo: Telegram Stars o Stripe."""
+    stars_listo = billing.stars_price > 0
+
+    variables_stripe = {
+        "STRIPE_SECRET_KEY": billing.stripe_secret_key,
+        "STRIPE_PRICE_ID": billing.stripe_price_id,
+        "STRIPE_WEBHOOK_SECRET": billing.stripe_webhook_secret,
+    }
+    faltantes_stripe = [nombre for nombre, valor in variables_stripe.items() if not valor]
+    stripe_listo = not faltantes_stripe
+    stripe_a_medias = faltantes_stripe and len(faltantes_stripe) < len(variables_stripe)
+
+    if stripe_a_medias:
+        raise RuntimeError(
+            f"Stripe está configurado a medias, falta: {', '.join(faltantes_stripe)}. "
+            "Complétalas o bórralas todas para usar solo Telegram Stars."
+        )
+
+    if not stars_listo and not stripe_listo:
+        raise RuntimeError(
+            "BILLING_ENABLED=true pero no hay ningún método de pago configurado. "
+            "Define TELEGRAM_STARS_PRICE (recomendado: se cobra dentro de "
+            "Telegram, sin cuenta de comercio) o las variables de Stripe, "
+            "o pon BILLING_ENABLED=false."
+        )
 
 
 def load_settings() -> Settings:
@@ -106,23 +137,12 @@ def load_settings() -> Settings:
         stripe_success_url=_env("STRIPE_SUCCESS_URL", "https://t.me"),
         stripe_cancel_url=_env("STRIPE_CANCEL_URL", "https://t.me"),
         premium_price_label=_env("PREMIUM_PRICE_LABEL", "5 USD/mes"),
+        stars_price=_env_int("TELEGRAM_STARS_PRICE", 0),
+        stars_as_subscription=_env_bool("TELEGRAM_STARS_SUBSCRIPTION", True),
     )
 
     if billing.enabled:
-        faltantes = [
-            nombre
-            for nombre, valor in (
-                ("STRIPE_SECRET_KEY", billing.stripe_secret_key),
-                ("STRIPE_PRICE_ID", billing.stripe_price_id),
-                ("STRIPE_WEBHOOK_SECRET", billing.stripe_webhook_secret),
-            )
-            if not valor
-        ]
-        if faltantes:
-            raise RuntimeError(
-                f"BILLING_ENABLED=true pero falta configurar: {', '.join(faltantes)}. "
-                "Complétalas en tu .env o pon BILLING_ENABLED=false."
-            )
+        _validar_metodos_de_pago(billing)
         if billing.free_daily_messages < 0:
             raise RuntimeError("FREE_DAILY_MESSAGES no puede ser negativo.")
 

@@ -24,9 +24,9 @@ además de Telegram.
 - La búsqueda web usa DuckDuckGo (no requiere API key).
 - Los usuarios, su consumo diario y su estado de suscripción se guardan en
   SQLite, para que sobrevivan a reinicios del proceso.
-- Los pagos se procesan con **Stripe Checkout** (nunca tocamos datos de
-  tarjeta). Un servidor HTTP embebido recibe los webhooks de Stripe y
-  activa/desactiva el Premium automáticamente.
+- Los pagos se cobran con **Telegram Stars** (dentro de la propia app, sin
+  cuenta de comercio) o con **Stripe Checkout** (nunca tocamos datos de
+  tarjeta). En ambos casos el Premium se activa y se revoca solo.
 
 ## Estructura del proyecto
 
@@ -40,6 +40,7 @@ app/ai/model_catalog.py         Descubre automáticamente los modelos gratis vig
 app/ai/tools/web_search.py      Herramienta de búsqueda (DuckDuckGo)
 app/ai/tools/web_fetch.py       Herramienta para leer el contenido de una URL
 app/billing/service.py          Cuotas del plan gratuito y estado Premium
+app/payments/telegram_stars.py  Cobros con Telegram Stars (sin cuenta de comercio)
 app/payments/stripe_client.py   Creación de links de pago y validación de webhooks
 app/payments/webhook_handler.py Traduce eventos de Stripe a cambios en la BD
 app/payments/webhook_server.py  Servidor HTTP (/health y /stripe/webhook)
@@ -85,10 +86,32 @@ tests/                          Tests (pytest)
 Para usar `/stats` pon tu ID de Telegram en `ADMIN_TELEGRAM_USER_IDS`
 (puedes averiguarlo escribiéndole a [@userinfobot](https://t.me/userinfobot)).
 
-## Activar los pagos (Stripe)
+## Activar los pagos
 
-Por defecto `BILLING_ENABLED=false` y el bot es ilimitado para todos. Para
-empezar a facturar:
+Por defecto `BILLING_ENABLED=false` y el bot es ilimitado para todos. Hay
+dos métodos de cobro y basta con configurar uno.
+
+### Opción A: Telegram Stars (recomendada)
+
+Los usuarios pagan con Stars dentro de la propia app de Telegram. **No
+necesitas cuenta de comercio, empresa registrada ni que Stripe opere en tu
+país** (Stripe, por ejemplo, no admite cobros desde Colombia), así que es
+la vía más rápida para empezar a facturar.
+
+1. Pon `BILLING_ENABLED=true`.
+2. Pon el precio en `TELEGRAM_STARS_PRICE` (por ejemplo `150`; como
+   referencia, 150 Stars ≈ 2-3 USD).
+3. Con `TELEGRAM_STARS_SUBSCRIPTION=true` Telegram renueva el cobro solo
+   cada 30 días; con `false` es un pago único que da 30 días de Premium.
+
+Cuando el usuario manda `/suscribirme` recibe la factura dentro del chat.
+Al pagar, el bot activa su Premium al instante. Los Stars acumulados se
+retiran desde [@BotFather](https://t.me/BotFather) (Bot Settings →
+Payments).
+
+### Opción B: Stripe
+
+Útil si ya tienes una cuenta de Stripe y quieres cobrar con tarjeta:
 
 1. Crea una cuenta en [Stripe](https://dashboard.stripe.com) y activa los
    pagos de tu país.
@@ -139,7 +162,7 @@ quedarse colgado.
 
 - [x] Agente con búsqueda web y lectura de páginas
 - [x] Fallback automático entre modelos gratuitos
-- [x] Plan gratuito con cuota diaria + Premium con Stripe
+- [x] Plan gratuito con cuota diaria + Premium (Telegram Stars y Stripe)
 - [x] Tests automatizados y linter
 - [x] Historial de conversación persistente (sobrevive a reinicios)
 - [x] Métricas de uso para el administrador (`/stats`)

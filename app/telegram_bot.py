@@ -10,6 +10,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    PreCheckoutQueryHandler,
     filters,
 )
 
@@ -19,6 +20,7 @@ from app.billing.service import BillingService
 from app.clock import today_iso
 from app.config import Settings
 from app.payments.stripe_client import StripeNotConfiguredError, StripeService
+from app.payments.telegram_stars import TelegramStarsService
 from app.storage.db import Database
 from app.storage.memory import ConversationMemory
 
@@ -82,6 +84,7 @@ def build_application(
     billing: BillingService,
     stripe_service: StripeService,
     db: Database,
+    stars_service: TelegramStarsService,
 ) -> Application:
     application = Application.builder().token(settings.telegram_bot_token).build()
     chat_locks = ChatLocks()
@@ -120,13 +123,26 @@ def build_application(
         )
 
     async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not settings.billing.enabled or not stripe_service.enabled:
+        if not settings.billing.enabled or not (
+            stripe_service.enabled or stars_service.enabled
+        ):
             await update.message.reply_text(
                 "Este bot todavía no tiene pagos habilitados: puedes usarlo gratis. 🙂"
             )
             return
 
         user_id = update.effective_user.id
+
+        # Telegram Stars es el método preferido: se paga dentro de Telegram,
+        # sin salir a un navegador ni necesitar cuenta de comercio.
+        if stars_service.enabled:
+            await context.bot.send_invoice(
+                chat_id=update.effective_chat.id,
+                **stars_service.invoice_kwargs(user_id),
+            )
+            if not stripe_service.enabled:
+                return
+
         try:
             checkout_url = await asyncio.to_thread(
                 stripe_service.create_checkout_url, user_id
@@ -150,6 +166,34 @@ def build_application(
             "El pago se procesa con Stripe; tu suscripción se activa sola en "
             "cuanto se confirme.",
             disable_web_page_preview=True,
+        )
+
+    async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Telegram pregunta si aceptamos el pago justo antes de cobrarlo."""
+        query = update.pre_checkout_query
+        if TelegramStarsService.parse_payload(query.invoice_payload) is None:
+            await query.answer(ok=False, error_message="Este pago ya no es válido.")
+            return
+        await query.answer(ok=True)
+
+    async def successful_payment_callback(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        payment = update.message.successful_payment
+        user_id = TelegramStarsService.parse_payload(payment.invoice_payload)
+        if user_id is None:
+            logger.warning("Pago recibido con payload desconocido: %s", payment.invoice_payload)
+            return
+
+        premium_until = TelegramStarsService.premium_until(payment)
+        await db.get_or_create_user(user_id)
+        await db.set_premium(user_id, is_premium=True, premium_until=premium_until)
+        logger.info("Usuario %s activó Premium con Stars hasta %s", user_id, premium_until)
+
+        await update.message.reply_text(
+            "✨ ¡Gracias! Tu plan Premium está activo: ya tienes mensajes "
+            f"ilimitados hasta el {premium_until[:10]}.\n\n"
+            "Puedes revisarlo cuando quieras con /estado."
         )
 
     async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -218,6 +262,10 @@ def build_application(
         CommandHandler(["suscribirme", "premium", "subscribe"], subscribe_command)
     )
     application.add_handler(CommandHandler(["stats", "estadisticas"], stats_command))
+    application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+    application.add_handler(
+        MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback)
+    )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(
         MessageHandler(

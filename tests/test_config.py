@@ -30,6 +30,8 @@ def env(monkeypatch):
         "ALLOWED_TELEGRAM_USER_IDS",
         "MAX_HISTORY_MESSAGES",
         "PORT",
+        "TELEGRAM_STARS_PRICE",
+        "TELEGRAM_STARS_SUBSCRIPTION",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -93,4 +95,26 @@ def test_ids_autorizados_se_parsean(env):
 def test_entero_invalido_falla_con_nombre_de_variable(env):
     env(MAX_HISTORY_MESSAGES="muchos")
     with pytest.raises(RuntimeError, match="MAX_HISTORY_MESSAGES"):
+        load_settings()
+
+
+def test_stars_por_si_solo_basta_para_facturar(env):
+    """Telegram Stars no necesita Stripe: es el método recomendado."""
+    env(BILLING_ENABLED="true", TELEGRAM_STARS_PRICE="150")
+    settings = load_settings()
+    assert settings.billing.enabled
+    assert settings.billing.stars_price == 150
+
+
+def test_sin_ningun_metodo_de_pago_falla(env):
+    env(BILLING_ENABLED="true")
+    with pytest.raises(RuntimeError, match="método de pago"):
+        load_settings()
+
+
+def test_stripe_a_medias_falla_aunque_haya_stars(env):
+    """Una configuración de Stripe incompleta es un error de despiste, no
+    algo que debamos ignorar en silencio."""
+    env(BILLING_ENABLED="true", TELEGRAM_STARS_PRICE="150", STRIPE_SECRET_KEY="sk_test")
+    with pytest.raises(RuntimeError, match="a medias"):
         load_settings()
