@@ -58,3 +58,20 @@ async def test_actividad_de_otro_dia_no_cuenta_como_hoy(db):
     stats = await db.get_stats(today_iso())
     assert stats["activos_hoy"] == 0
     assert stats["usuarios"] == 1
+
+
+@pytest.mark.asyncio
+async def test_borra_todos_los_datos_de_un_usuario(db):
+    memory = ConversationMemory(db, max_messages=10)
+    await db.get_or_create_user(1)
+    await db.get_or_create_user(2)
+    await memory.append(1, {"role": "user", "content": "algo privado"})
+    await memory.append(2, {"role": "user", "content": "de otro usuario"})
+
+    await db.delete_user_data(1)
+
+    assert await memory.get(1) == []
+    stats = await db.get_stats(today_iso())
+    assert stats["usuarios"] == 1
+    # Los datos del otro usuario siguen intactos.
+    assert len(await memory.get(2)) == 1

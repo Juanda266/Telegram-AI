@@ -93,6 +93,7 @@ tests/                          Tests (pytest)
 | `/nuevo` | Borra el historial de la conversación actual |
 | `/estado` | Muestra tu plan y mensajes disponibles hoy |
 | `/suscribirme` | Envía la factura del plan Premium |
+| `/borrar_datos` | Borra todo lo que el bot guarda sobre ti |
 | `/stats` | Solo administradores: usuarios, suscriptores y uso del día |
 
 Para usar `/stats` pon tu ID de Telegram en `ADMIN_TELEGRAM_USER_IDS`
@@ -152,6 +153,24 @@ plan gratuito.
 
 > Los eventos de Stripe se procesan de forma **idempotente** (se guarda el
 > `event_id` procesado), así que reintentos de Stripe no duplican nada.
+
+## Seguridad
+
+Aspectos tenidos en cuenta, por si amplías el proyecto:
+
+- **SSRF:** `web_fetch` resuelve el dominio y rechaza direcciones privadas,
+  de loopback, link-local y reservadas (incluida `169.254.169.254`, los
+  metadatos de la nube), también tras seguir redirecciones. La URL la elige
+  el modelo a partir de lo que escribe el usuario, así que no es confiable.
+- **Inyección de prompt:** el contenido de las páginas se le entrega al
+  modelo envuelto y marcado como datos no confiables, con instrucciones
+  explícitas de no obedecer lo que diga.
+- **Ejecución de código:** la calculadora evalúa recorriendo el árbol
+  sintáctico, nunca con `eval()`.
+- **Pagos:** los webhooks de Stripe se validan por firma y se procesan de
+  forma idempotente; nunca se manejan datos de tarjeta.
+- **Datos personales:** `/borrar_datos` elimina el historial y el registro
+  de uso de quien lo pida.
 
 ## Desarrollo
 

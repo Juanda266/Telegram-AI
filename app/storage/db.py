@@ -116,6 +116,9 @@ class Database:
             self._link_stripe_customer_sync, telegram_user_id, stripe_customer_id
         )
 
+    async def delete_user_data(self, telegram_user_id: int) -> None:
+        await asyncio.to_thread(self._delete_user_data_sync, telegram_user_id)
+
     async def get_stats(self, today: str) -> dict[str, int]:
         return await asyncio.to_thread(self._get_stats_sync, today)
 
@@ -215,6 +218,20 @@ class Database:
             self._conn.execute(
                 "UPDATE users SET stripe_customer_id = ? WHERE telegram_user_id = ?",
                 (stripe_customer_id, telegram_user_id),
+            )
+
+    def _delete_user_data_sync(self, telegram_user_id: int) -> None:
+        """Borra todo lo que guardamos de una persona.
+
+        En Telegram el ID de usuario y el del chat privado coinciden, así que
+        el mismo identificador sirve para borrar su historial.
+        """
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM messages WHERE chat_id = ?", (telegram_user_id,)
+            )
+            self._conn.execute(
+                "DELETE FROM users WHERE telegram_user_id = ?", (telegram_user_id,)
             )
 
     def _get_stats_sync(self, today: str) -> dict[str, int]:

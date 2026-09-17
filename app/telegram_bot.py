@@ -35,6 +35,7 @@ WELCOME_MESSAGE = (
     "/nuevo — borra el historial de esta conversación\n"
     "/estado — muestra tu plan y mensajes disponibles\n"
     "/suscribirme — activa el plan Premium (mensajes ilimitados)\n"
+    "/borrar_datos — borra todo lo que guardo sobre ti\n"
     "/ayuda — muestra este mensaje"
 )
 
@@ -107,6 +108,22 @@ def build_application(
             f"Activos hoy: {stats['activos_hoy']}\n"
             f"Mensajes hoy: {stats['mensajes_hoy']}",
             parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def delete_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id
+        if await billing.is_premium(user_id):
+            await update.message.reply_text(
+                "⚠️ Tienes una suscripción Premium activa. Cancélala primero "
+                "para no seguir pagando, y después vuelve a usar este comando."
+            )
+            return
+
+        await db.delete_user_data(user_id)
+        await update.message.reply_text(
+            "🗑️ Listo, borré todos tus datos: historial de conversación y "
+            "registro de uso. Puedes seguir usando el bot cuando quieras; "
+            "empezarás de cero."
         )
 
     async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -249,6 +266,9 @@ def build_application(
         CommandHandler(["suscribirme", "premium", "subscribe"], subscribe_command)
     )
     application.add_handler(CommandHandler(["stats", "estadisticas"], stats_command))
+    application.add_handler(
+        CommandHandler(["borrar_datos", "olvidame"], delete_data_command)
+    )
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(
         MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback)
