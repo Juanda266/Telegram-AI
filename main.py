@@ -62,7 +62,7 @@ async def run() -> None:
     webhook_app = build_webhook_app(
         stripe_service, WebhookHandler(db=db, stripe_service=stripe_service)
     )
-    application = build_application(settings, agent, memory, billing, stripe_service)
+    application = build_application(settings, agent, memory, billing, stripe_service, db)
 
     runner = await start_webhook_server(webhook_app, settings.http_port)
 

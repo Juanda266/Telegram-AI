@@ -15,8 +15,10 @@ from telegram.ext import (
 
 from app.ai.agent import ResearchAgent
 from app.billing.service import BillingService
+from app.clock import today_iso
 from app.config import Settings
 from app.payments.stripe_client import StripeNotConfiguredError, StripeService
+from app.storage.db import Database
 from app.storage.memory import ConversationMemory
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,7 @@ def build_application(
     memory: ConversationMemory,
     billing: BillingService,
     stripe_service: StripeService,
+    db: Database,
 ) -> Application:
     application = Application.builder().token(settings.telegram_bot_token).build()
     chat_locks = ChatLocks()
@@ -92,6 +95,28 @@ def build_application(
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = await billing.get_status_text(update.effective_user.id)
         await update.message.reply_text(text)
+
+    async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_user.id not in settings.admin_user_ids:
+            await update.message.reply_text("🚫 Este comando es solo para administradores.")
+            return
+
+        stats = await db.get_stats(today_iso())
+        await update.message.reply_text(
+            "📊 *Estadísticas*\n\n"
+            f"Usuarios totales: {stats['usuarios']}\n"
+            f"Suscriptores Premium: {stats['premium']}\n"
+            f"Nuevos hoy: {stats['nuevos_hoy']}\n"
+            f"Activos hoy: {stats['activos_hoy']}\n"
+            f"Mensajes hoy: {stats['mensajes_hoy']}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.message.reply_text(
+            "📎 Por ahora solo entiendo mensajes de texto. "
+            "Describe con palabras lo que necesitas y te ayudo."
+        )
 
     async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not settings.billing.enabled or not stripe_service.enabled:
@@ -181,7 +206,14 @@ def build_application(
     application.add_handler(
         CommandHandler(["suscribirme", "premium", "subscribe"], subscribe_command)
     )
+    application.add_handler(CommandHandler(["stats", "estadisticas"], stats_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(
+        MessageHandler(
+            filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.VIDEO,
+            handle_unsupported,
+        )
+    )
 
     return application
 

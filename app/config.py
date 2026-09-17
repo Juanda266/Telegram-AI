@@ -75,6 +75,7 @@ class Settings:
     database_path: Path
     http_port: int
     allowed_user_ids: set[int] = field(default_factory=set)
+    admin_user_ids: set[int] = field(default_factory=set)
     max_history_messages: int = 20
     max_agent_steps: int = 6
     log_level: str = "INFO"
@@ -136,6 +137,7 @@ def load_settings() -> Settings:
         database_path=Path(_env("DATABASE_PATH", "data/bot.db")),
         http_port=_env_int("PORT", 8080),
         allowed_user_ids=_parse_allowed_ids(_env("ALLOWED_TELEGRAM_USER_IDS")),
+        admin_user_ids=_parse_allowed_ids(_env("ADMIN_TELEGRAM_USER_IDS")),
         max_history_messages=_env_int("MAX_HISTORY_MESSAGES", 20),
         max_agent_steps=_env_int("MAX_AGENT_STEPS", 6),
         log_level=_env("LOG_LEVEL", "INFO").upper(),

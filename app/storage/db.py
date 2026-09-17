@@ -113,6 +113,9 @@ class Database:
             self._link_stripe_customer_sync, telegram_user_id, stripe_customer_id
         )
 
+    async def get_stats(self, today: str) -> dict[str, int]:
+        return await asyncio.to_thread(self._get_stats_sync, today)
+
     async def was_event_processed(self, event_id: str) -> bool:
         return await asyncio.to_thread(self._was_event_processed_sync, event_id)
 
@@ -200,6 +203,30 @@ class Database:
                 "UPDATE users SET stripe_customer_id = ? WHERE telegram_user_id = ?",
                 (stripe_customer_id, telegram_user_id),
             )
+
+    def _get_stats_sync(self, today: str) -> dict[str, int]:
+        with self._lock, self._conn:
+            usuarios = self._conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+            premium = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE is_premium = 1"
+            ).fetchone()["n"]
+            activos_hoy = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE free_used_date = ?", (today,)
+            ).fetchone()["n"]
+            nuevos_hoy = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE created_at LIKE ?", (f"{today}%",)
+            ).fetchone()["n"]
+            mensajes_hoy = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM messages WHERE created_at LIKE ? AND role = 'user'",
+                (f"{today}%",),
+            ).fetchone()["n"]
+        return {
+            "usuarios": usuarios,
+            "premium": premium,
+            "activos_hoy": activos_hoy,
+            "nuevos_hoy": nuevos_hoy,
+            "mensajes_hoy": mensajes_hoy,
+        }
 
     def _was_event_processed_sync(self, event_id: str) -> bool:
         with self._lock, self._conn:

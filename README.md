@@ -80,6 +80,10 @@ tests/                          Tests (pytest)
 | `/nuevo` | Borra el historial de la conversación actual |
 | `/estado` | Muestra tu plan y mensajes disponibles hoy |
 | `/suscribirme` | Genera el link de pago del plan Premium |
+| `/stats` | Solo administradores: usuarios, suscriptores y uso del día |
+
+Para usar `/stats` pon tu ID de Telegram en `ADMIN_TELEGRAM_USER_IDS`
+(puedes averiguarlo escribiéndole a [@userinfobot](https://t.me/userinfobot)).
 
 ## Activar los pagos (Stripe)
 
@@ -137,7 +141,8 @@ quedarse colgado.
 - [x] Fallback automático entre modelos gratuitos
 - [x] Plan gratuito con cuota diaria + Premium con Stripe
 - [x] Tests automatizados y linter
-- [ ] Persistir también el historial de conversación en SQLite
+- [x] Historial de conversación persistente (sobrevive a reinicios)
+- [x] Métricas de uso para el administrador (`/stats`)
 - [ ] Más herramientas (calculadora, lectura de PDFs e imágenes)
-- [ ] Panel de administración con métricas de uso e ingresos
+- [ ] Entender audios e imágenes que envíe el usuario
 - [ ] Conectar otras plataformas (web, WhatsApp, Discord)
