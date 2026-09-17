@@ -16,6 +16,7 @@ from telegram.ext import (
 
 from app.ai.agent import ResearchAgent
 from app.ai.openrouter_client import AllModelsFailedError
+from app.ai.vision import VisionService
 from app.billing.service import BillingService
 from app.clock import today_iso
 from app.config import Settings
@@ -46,6 +47,15 @@ TYPING_REFRESH_SECONDS = 4
 
 def _is_authorized(settings: Settings, user_id: int) -> bool:
     return not settings.allowed_user_ids or user_id in settings.allowed_user_ids
+
+
+def _mensaje_sin_cuota(settings: Settings) -> str:
+    return (
+        "🚦 Se te acabaron los mensajes gratuitos de hoy.\n\n"
+        f"Con el plan Premium ({settings.billing.premium_price_label}) tienes "
+        "mensajes ilimitados: usa /suscribirme.\n"
+        "O vuelve mañana, tu cuota gratuita se renueva cada día."
+    )
 
 
 class ChatLocks:
@@ -85,6 +95,7 @@ def build_application(
     stripe_service: StripeService,
     db: Database,
     stars_service: TelegramStarsService,
+    vision: VisionService | None = None,
 ) -> Application:
     application = Application.builder().token(settings.telegram_bot_token).build()
     chat_locks = ChatLocks()
@@ -118,9 +129,65 @@ def build_application(
 
     async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
-            "📎 Por ahora solo entiendo mensajes de texto. "
+            "📎 Por ahora entiendo texto e imágenes. "
             "Describe con palabras lo que necesitas y te ayudo."
         )
+
+    async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        message = update.message
+        user = update.effective_user
+        if user is None or not _is_authorized(settings, user.id):
+            await message.reply_text("🚫 No tienes autorización para usar este bot.")
+            return
+
+        if vision is None:
+            await handle_unsupported(update, context)
+            return
+
+        quota = await billing.check_and_consume(user.id)
+        if not quota.allowed:
+            await message.reply_text(_mensaje_sin_cuota(settings))
+            return
+
+        chat_id = update.effective_chat.id
+
+        async with chat_locks.acquire(chat_id):
+            typing = asyncio.create_task(_keep_typing(context.bot, chat_id))
+            try:
+                # message.photo trae varias resoluciones; la última es la mayor.
+                archivo = await message.photo[-1].get_file()
+                imagen = bytes(await archivo.download_as_bytearray())
+                descripcion = await vision.describe(imagen)
+
+                pregunta = message.caption or "¿Qué hay en esta imagen?"
+                contexto = (
+                    f"El usuario envió una imagen. Esto es lo que se ve en ella:\n"
+                    f"{descripcion}\n\nSu mensaje sobre la imagen: {pregunta}"
+                )
+                history = await memory.get(chat_id)
+                reply_text = await agent.run(history, contexto)
+            except AllModelsFailedError:
+                logger.exception("Ningún modelo pudo procesar la imagen")
+                await billing.refund(user.id)
+                reply_text = (
+                    "⚠️ Ahora mismo no pude analizar la imagen (no hay modelos "
+                    "de visión gratuitos disponibles). Este mensaje no te cuenta; "
+                    "prueba de nuevo en unos minutos o descríbemela con palabras."
+                )
+            except Exception:
+                logger.exception("Error procesando la imagen")
+                await billing.refund(user.id)
+                reply_text = (
+                    "⚠️ Ocurrió un error analizando la imagen. "
+                    "No te cuenta como consumo; intenta de nuevo."
+                )
+            else:
+                await memory.append(chat_id, {"role": "user", "content": pregunta})
+                await memory.append(chat_id, {"role": "assistant", "content": reply_text})
+            finally:
+                typing.cancel()
+
+        await _reply_safely(message, reply_text)
 
     async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not settings.billing.enabled or not (
@@ -217,12 +284,7 @@ def build_application(
 
         quota = await billing.check_and_consume(user.id)
         if not quota.allowed:
-            await message.reply_text(
-                "🚦 Se te acabaron los mensajes gratuitos de hoy.\n\n"
-                f"Con el plan Premium ({settings.billing.premium_price_label}) tienes "
-                "mensajes ilimitados: usa /suscribirme.\n"
-                "O vuelve mañana, tu cuota gratuita se renueva cada día."
-            )
+            await message.reply_text(_mensaje_sin_cuota(settings))
             return
 
         chat_id = update.effective_chat.id
@@ -276,9 +338,10 @@ def build_application(
         MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback)
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(
         MessageHandler(
-            filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.VIDEO,
+            filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.VIDEO,
             handle_unsupported,
         )
     )

@@ -132,3 +132,26 @@ async def test_catalogo_roto_no_rompe_el_cliente():
     client = OpenRouterClient("key", ["configurado"], catalog=BrokenCatalog())
 
     assert await client._candidate_models() == ["configurado"]
+
+
+@pytest.mark.asyncio
+async def test_separa_los_modelos_que_aceptan_imagenes(patch_catalog_client):
+    patch_catalog_client(
+        _responder(
+            [
+                _model("solo-texto", modalities=["text"]),
+                _model("con-vision", modalities=["text", "image"]),
+            ]
+        )
+    )
+    catalog = FreeModelCatalog()
+
+    assert await catalog.get_free_models() == ["solo-texto", "con-vision"]
+    assert await catalog.get_free_vision_models() == ["con-vision"]
+
+
+@pytest.mark.asyncio
+async def test_sin_modelos_de_vision_devuelve_lista_vacia(patch_catalog_client):
+    patch_catalog_client(_responder([_model("solo-texto", modalities=["text"])]))
+
+    assert await FreeModelCatalog().get_free_vision_models() == []

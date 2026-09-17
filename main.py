@@ -7,6 +7,7 @@ from app.ai.agent import ResearchAgent
 from app.ai.model_catalog import FreeModelCatalog
 from app.ai.openrouter_client import OpenRouterClient
 from app.ai.rate_limiter import RateLimiter
+from app.ai.vision import VisionService
 from app.billing.service import BillingService
 from app.config import configure_logging, load_settings
 from app.payments.stripe_client import StripeService
@@ -29,13 +30,24 @@ async def run() -> None:
         ", ".join(settings.openrouter_models),
     )
 
+    catalog = FreeModelCatalog(api_key=settings.openrouter_api_key)
+    # El limitador se comparte entre texto y visión: la cuota de OpenRouter
+    # es de la API key, no de cada servicio por separado.
+    rate_limiter = RateLimiter(max_calls=settings.openrouter_requests_per_minute)
+
     client = OpenRouterClient(
         api_key=settings.openrouter_api_key,
         models=settings.openrouter_models,
         site_url=settings.openrouter_site_url,
         app_name=settings.openrouter_app_name,
-        catalog=FreeModelCatalog(api_key=settings.openrouter_api_key),
-        rate_limiter=RateLimiter(max_calls=settings.openrouter_requests_per_minute),
+        catalog=catalog,
+        rate_limiter=rate_limiter,
+    )
+    vision = VisionService(
+        api_key=settings.openrouter_api_key,
+        catalog=catalog,
+        headers=client.headers,
+        rate_limiter=rate_limiter,
     )
     agent = ResearchAgent(client=client, max_steps=settings.max_agent_steps)
     db = Database(settings.database_path)
@@ -70,7 +82,7 @@ async def run() -> None:
         stripe_service, WebhookHandler(db=db, stripe_service=stripe_service)
     )
     application = build_application(
-        settings, agent, memory, billing, stripe_service, db, stars_service
+        settings, agent, memory, billing, stripe_service, db, stars_service, vision
     )
 
     runner = await start_webhook_server(webhook_app, settings.http_port)

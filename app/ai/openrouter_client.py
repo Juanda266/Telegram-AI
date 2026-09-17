@@ -53,6 +53,12 @@ class OpenRouterClient:
         if app_name:
             self._headers["X-Title"] = app_name
 
+    @property
+    def headers(self) -> dict[str, str]:
+        """Cabeceras de autenticación, reutilizables por otros servicios que
+        llamen a la misma API (por ejemplo, el de visión)."""
+        return dict(self._headers)
+
     async def _candidate_models(self) -> list[str]:
         """Modelos configurados primero y, detrás, los gratuitos descubiertos
         automáticamente (sin repetir), como red de seguridad extra."""

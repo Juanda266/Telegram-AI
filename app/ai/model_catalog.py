@@ -44,6 +44,11 @@ def _is_usable(model: dict) -> bool:
     return "text" in modalities
 
 
+def _supports_images(model: dict) -> bool:
+    modalities = (model.get("architecture") or {}).get("input_modalities") or ["text"]
+    return "image" in modalities
+
+
 class FreeModelCatalog:
     """Cachea la lista de modelos gratuitos, refrescándola cada pocas horas."""
 
@@ -51,19 +56,29 @@ class FreeModelCatalog:
         self._api_key = api_key
         self._ttl_seconds = ttl_seconds
         self._cached: list[str] = []
+        self._cached_vision: list[str] = []
         self._fetched_at: float = 0.0
 
     async def get_free_models(self) -> list[str]:
-        if self._cached and (time.monotonic() - self._fetched_at) < self._ttl_seconds:
-            return self._cached
-
-        models = await self._fetch()
-        if models:
-            self._cached = models
-            self._fetched_at = time.monotonic()
+        await self._refrescar_si_hace_falta()
         return self._cached
 
-    async def _fetch(self) -> list[str]:
+    async def get_free_vision_models(self) -> list[str]:
+        """Modelos gratuitos que además aceptan imágenes como entrada."""
+        await self._refrescar_si_hace_falta()
+        return self._cached_vision
+
+    async def _refrescar_si_hace_falta(self) -> None:
+        if self._cached and (time.monotonic() - self._fetched_at) < self._ttl_seconds:
+            return
+
+        models, vision_models = await self._fetch()
+        if models:
+            self._cached = models
+            self._cached_vision = vision_models
+            self._fetched_at = time.monotonic()
+
+    async def _fetch(self) -> tuple[list[str], list[str]]:
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
@@ -74,7 +89,7 @@ class FreeModelCatalog:
             logger.warning(
                 "No se pudo consultar el catálogo de modelos de OpenRouter: %s", exc
             )
-            return []
+            return [], []
 
         candidates = [
             model
@@ -85,8 +100,13 @@ class FreeModelCatalog:
         candidates.sort(key=lambda m: m.get("context_length") or 0, reverse=True)
 
         discovered = [model["id"] for model in candidates[:MAX_DISCOVERED_MODELS]]
+        vision = [
+            model["id"] for model in candidates if _supports_images(model)
+        ][:MAX_DISCOVERED_MODELS]
+
         logger.info(
-            "Modelos gratuitos descubiertos en OpenRouter: %s",
+            "Modelos gratuitos descubiertos en OpenRouter: %s (con visión: %s)",
             ", ".join(discovered) or "(ninguno)",
+            ", ".join(vision) or "(ninguno)",
         )
-        return discovered
+        return discovered, vision
