@@ -1,8 +1,9 @@
 # Telegram AI Assistant
 
 Asistente virtual para Telegram con capacidad de **investigar en la web**
-(similar a Gemini o Perplexity), pensado para poder ampliarse en el futuro
-a otras plataformas además de Telegram.
+(similar a Gemini o Perplexity), con **plan gratuito y suscripción de pago
+vía Stripe**, pensado para poder ampliarse en el futuro a otras plataformas
+además de Telegram.
 
 ## Cómo funciona
 
@@ -17,19 +18,29 @@ a otras plataformas además de Telegram.
   o si ya puede responder (`final`). Esto funciona con modelos gratuitos
   que no soportan "function calling" nativo.
 - La búsqueda web usa DuckDuckGo (no requiere API key).
-- El historial de conversación se guarda en memoria, por chat de Telegram.
+- Los usuarios, su consumo diario y su estado de suscripción se guardan en
+  SQLite, para que sobrevivan a reinicios del proceso.
+- Los pagos se procesan con **Stripe Checkout** (nunca tocamos datos de
+  tarjeta). Un servidor HTTP embebido recibe los webhooks de Stripe y
+  activa/desactiva el Premium automáticamente.
 
 ## Estructura del proyecto
 
 ```
-main.py                     Punto de entrada
-app/config.py                Carga de configuración (.env)
-app/telegram_bot.py          Handlers de Telegram
-app/storage/memory.py        Historial de conversación en RAM
-app/ai/agent.py               Bucle del agente (decide buscar o responder)
-app/ai/openrouter_client.py   Cliente HTTP a OpenRouter con fallback de modelos
-app/ai/tools/web_search.py    Herramienta de búsqueda (DuckDuckGo)
-app/ai/tools/web_fetch.py     Herramienta para leer el contenido de una URL
+main.py                        Punto de entrada (bot + servidor de webhooks)
+app/config.py                   Carga y validación de configuración (.env)
+app/telegram_bot.py             Handlers y comandos de Telegram
+app/ai/agent.py                 Bucle del agente (decide buscar o responder)
+app/ai/openrouter_client.py     Cliente a OpenRouter con fallback entre modelos
+app/ai/tools/web_search.py      Herramienta de búsqueda (DuckDuckGo)
+app/ai/tools/web_fetch.py       Herramienta para leer el contenido de una URL
+app/billing/service.py          Cuotas del plan gratuito y estado Premium
+app/payments/stripe_client.py   Creación de links de pago y validación de webhooks
+app/payments/webhook_handler.py Traduce eventos de Stripe a cambios en la BD
+app/payments/webhook_server.py  Servidor HTTP (/health y /stripe/webhook)
+app/storage/db.py               Persistencia SQLite (usuarios, suscripciones)
+app/storage/memory.py           Historial de conversación en RAM
+tests/                          Tests (pytest)
 ```
 
 ## Puesta en marcha
@@ -51,23 +62,75 @@ app/ai/tools/web_fetch.py     Herramienta para leer el contenido de una URL
 
    ```bash
    docker build -t telegram-ai .
-   docker run --env-file .env telegram-ai
+   docker run --env-file .env -p 8080:8080 telegram-ai
    ```
 
-5. Escríbele a tu bot en Telegram. Comandos disponibles: `/start`,
-   `/ayuda`, `/nuevo` (borra el historial de la conversación actual).
+5. Escríbele a tu bot en Telegram.
 
-## Notas sobre el nivel gratuito
+### Comandos disponibles
 
-Los modelos `...:free` de OpenRouter tienen límites de uso (por minuto y
-por día) que pueden cambiar sin aviso. Por eso el cliente prueba varios
-modelos en orden: si todos fallan al mismo tiempo, el bot avisa al usuario
-en vez de quedarse colgado.
+| Comando | Qué hace |
+| --- | --- |
+| `/start`, `/ayuda` | Mensaje de bienvenida |
+| `/nuevo` | Borra el historial de la conversación actual |
+| `/estado` | Muestra tu plan y mensajes disponibles hoy |
+| `/suscribirme` | Genera el link de pago del plan Premium |
 
-## Próximos pasos / roadmap
+## Activar los pagos (Stripe)
 
-- Restringir el uso a ciertos usuarios (`ALLOWED_TELEGRAM_USER_IDS`).
-- Persistir el historial en disco (SQLite) en vez de solo en memoria.
-- Añadir más herramientas (calculadora, lectura de PDFs/imágenes, etc.).
-- Extraer la lógica del agente a un servicio reutilizable para conectar
-  otras plataformas además de Telegram (web, WhatsApp, Discord...).
+Por defecto `BILLING_ENABLED=false` y el bot es ilimitado para todos. Para
+empezar a facturar:
+
+1. Crea una cuenta en [Stripe](https://dashboard.stripe.com) y activa los
+   pagos de tu país.
+2. Crea un **producto con precio recurrente** (por ejemplo 5 USD/mes) y
+   copia su ID (`price_...`) en `STRIPE_PRICE_ID`.
+3. Copia tu clave secreta (`sk_live_...` o `sk_test_...`) en
+   `STRIPE_SECRET_KEY`.
+4. El bot expone el endpoint `POST /stripe/webhook`. Necesita ser accesible
+   desde internet:
+   - En desarrollo: `stripe listen --forward-to localhost:8080/stripe/webhook`
+   - En producción: despliega en Render/Railway/Fly y registra
+     `https://tu-dominio/stripe/webhook` en
+     [Dashboard → Webhooks](https://dashboard.stripe.com/webhooks).
+   Suscribe estos eventos: `checkout.session.completed`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`.
+5. Copia el *signing secret* del webhook (`whsec_...`) en
+   `STRIPE_WEBHOOK_SECRET`.
+6. Pon `BILLING_ENABLED=true` y ajusta `FREE_DAILY_MESSAGES` (mensajes
+   gratis al día) y `PREMIUM_PRICE_LABEL` (el texto que ve el usuario).
+
+Cuando un usuario manda `/suscribirme`, el bot genera un link de Stripe
+Checkout con su ID de Telegram asociado. Al confirmarse el pago, el webhook
+activa su Premium. Si cancela o falla el cobro, vuelve automáticamente al
+plan gratuito.
+
+> Los eventos de Stripe se procesan de forma **idempotente** (se guarda el
+> `event_id` procesado), así que reintentos de Stripe no duplican nada.
+
+## Desarrollo
+
+```bash
+pip install -r requirements-dev.txt
+pytest          # tests
+ruff check .    # linter
+```
+
+## Notas sobre el nivel gratuito de OpenRouter
+
+Los modelos `...:free` tienen límites de uso (por minuto y por día) que
+pueden cambiar sin aviso. Por eso el cliente prueba varios modelos en
+orden: si todos fallan al mismo tiempo, el bot avisa al usuario en vez de
+quedarse colgado.
+
+## Roadmap
+
+- [x] Agente con búsqueda web y lectura de páginas
+- [x] Fallback automático entre modelos gratuitos
+- [x] Plan gratuito con cuota diaria + Premium con Stripe
+- [x] Tests automatizados y linter
+- [ ] Persistir también el historial de conversación en SQLite
+- [ ] Más herramientas (calculadora, lectura de PDFs e imágenes)
+- [ ] Panel de administración con métricas de uso e ingresos
+- [ ] Conectar otras plataformas (web, WhatsApp, Discord)
