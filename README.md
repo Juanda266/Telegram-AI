@@ -47,6 +47,7 @@ app/ai/rate_limiter.py          Respeta la cuota de peticiones por minuto
 app/ai/tools/web_search.py      Herramienta de búsqueda (DuckDuckGo)
 app/ai/tools/web_fetch.py       Herramienta para leer el contenido de una URL
 app/ai/tools/calculator.py      Calculadora segura (sin eval) para el agente
+app/ai/tools/pdf_reader.py      Extracción de texto de documentos PDF
 app/billing/service.py          Cuotas del plan gratuito y estado Premium
 app/payments/telegram_stars.py  Cobros con Telegram Stars (sin cuenta de comercio)
 app/payments/stripe_client.py   Creación de links de pago y validación de webhooks
@@ -81,9 +82,12 @@ tests/                          Tests (pytest)
    docker run --env-file .env -p 8080:8080 telegram-ai
    ```
 
-5. Escríbele a tu bot en Telegram. Puedes mandarle texto o fotos: si le
-   envías una imagen (con o sin pie de foto), la analiza y responde sobre
-   lo que ve, incluyendo el texto que aparezca en ella.
+5. Escríbele a tu bot en Telegram. Entiende:
+   - **Texto:** preguntas normales; busca en la web cuando hace falta.
+   - **Fotos:** las analiza y responde sobre lo que ve, incluido el texto
+     que aparezca en ellas.
+   - **PDFs:** extrae su contenido y puedes preguntarle sobre el documento
+     (mándalo con un pie de foto para pedirle algo concreto).
 
 ### Comandos disponibles
 
@@ -200,7 +204,7 @@ quedarse colgado.
 - [x] Métricas de uso para el administrador (`/stats`)
 - [x] Calculadora (los modelos fallan en aritmética)
 - [x] Entender imágenes que envíe el usuario
+- [x] Lectura de documentos PDF
 - [ ] Transcribir audios y notas de voz
-- [ ] Lectura de PDFs
 - [x] Lógica separada de Telegram, lista para otras plataformas
 - [ ] Conectar otras plataformas (web, WhatsApp, Discord)

@@ -252,3 +252,45 @@ async def test_tras_un_timeout_la_conversacion_sigue_viva(db):
     agent.colgado = False
 
     assert (await assistant.handle_text(1, 100, "otra")).text == "por fin"
+
+
+def _pdf_de_prueba(texto="Contenido del documento"):
+    from tests.test_pdf_reader import build_pdf
+
+    return build_pdf([texto])
+
+
+@pytest.mark.asyncio
+async def test_procesa_un_pdf(db):
+    agent = FakeAgent("El documento habla de X")
+    assistant = _assistant(db, agent)
+
+    reply = await assistant.handle_pdf(
+        1, 100, _pdf_de_prueba("Factura por 50000 pesos"), "factura.pdf", "¿cuánto es?"
+    )
+
+    assert reply.text == "El documento habla de X"
+    contexto = agent.llamadas[0][1]
+    assert "factura.pdf" in contexto
+    assert "Factura por 50000 pesos" in contexto
+    assert "¿cuánto es?" in contexto
+
+
+@pytest.mark.asyncio
+async def test_pdf_sin_pie_de_foto_pide_un_resumen(db):
+    agent = FakeAgent()
+    assistant = _assistant(db, agent)
+
+    await assistant.handle_pdf(1, 100, _pdf_de_prueba(), "doc.pdf")
+
+    assert "Resume este documento" in agent.llamadas[0][1]
+
+
+@pytest.mark.asyncio
+async def test_un_pdf_ilegible_no_gasta_cuota(db):
+    assistant = _assistant(db, free_daily=2)
+
+    reply = await assistant.handle_pdf(1, 100, b"no soy un pdf", "raro.pdf")
+
+    assert "PDF" in reply.text
+    assert (await assistant.handle_text(1, 100, "otra")).remaining_free_messages == 1

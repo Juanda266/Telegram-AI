@@ -128,7 +128,7 @@ def build_application(
 
     async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
-            "📎 Por ahora entiendo texto e imágenes. "
+            "📎 Por ahora entiendo texto, imágenes y documentos PDF. "
             "Describe con palabras lo que necesitas y te ayudo."
         )
 
@@ -216,13 +216,16 @@ def build_application(
         )
 
     async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await _procesar(update, context, con_imagen=True)
+        await _procesar(update, context, tipo="imagen")
+
+    async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await _procesar(update, context, tipo="pdf")
 
     async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await _procesar(update, context, con_imagen=False)
+        await _procesar(update, context, tipo="texto")
 
     async def _procesar(
-        update: Update, context: ContextTypes.DEFAULT_TYPE, con_imagen: bool
+        update: Update, context: ContextTypes.DEFAULT_TYPE, tipo: str
     ) -> None:
         message = update.message
         user = update.effective_user
@@ -235,12 +238,22 @@ def build_application(
         # investiga: Telegram lo apaga solo a los ~5 segundos.
         typing = asyncio.create_task(_keep_typing(context.bot, chat_id))
         try:
-            if con_imagen:
+            if tipo == "imagen":
                 # message.photo trae varias resoluciones; la última es la mayor.
                 archivo = await message.photo[-1].get_file()
                 imagen = bytes(await archivo.download_as_bytearray())
                 reply = await assistant.handle_image(
                     user.id, chat_id, imagen, message.caption
+                )
+            elif tipo == "pdf":
+                archivo = await message.document.get_file()
+                pdf = bytes(await archivo.download_as_bytearray())
+                reply = await assistant.handle_pdf(
+                    user.id,
+                    chat_id,
+                    pdf,
+                    message.document.file_name or "documento.pdf",
+                    message.caption,
                 )
             else:
                 reply = await assistant.handle_text(user.id, chat_id, message.text)
@@ -275,6 +288,7 @@ def build_application(
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
     application.add_handler(
         MessageHandler(
             filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.VIDEO,

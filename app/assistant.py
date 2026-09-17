@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from app.ai.agent import ResearchAgent
 from app.ai.openrouter_client import AllModelsFailedError
+from app.ai.tools.pdf_reader import PdfExtractionError, extract_text
 from app.ai.vision import VisionService
 from app.billing.service import BillingService
 from app.storage.memory import ConversationMemory
@@ -48,7 +49,7 @@ MENSAJE_TIMEOUT = (
     "más concreta."
 )
 MENSAJE_IMAGEN_NO_SOPORTADA = (
-    "📎 Por ahora entiendo texto e imágenes. "
+    "📎 Por ahora entiendo texto, imágenes y documentos PDF. "
     "Describe con palabras lo que necesitas y te ayudo."
 )
 
@@ -144,6 +145,39 @@ class Assistant:
             quota,
             mensaje_modelos_caidos=MENSAJE_SIN_VISION,
         )
+
+    async def handle_pdf(
+        self,
+        user_id: int,
+        conversation_id: int,
+        pdf_bytes: bytes,
+        filename: str = "documento.pdf",
+        caption: str | None = None,
+    ) -> AssistantReply:
+        quota = await self._billing.check_and_consume(user_id)
+        if not quota.allowed:
+            return AssistantReply(text=SIN_CUOTA, quota_exhausted=True)
+
+        try:
+            texto = await asyncio.to_thread(extract_text, pdf_bytes)
+        except PdfExtractionError as exc:
+            # No es un fallo nuestro ni del usuario: le explicamos qué pasó y
+            # no le gastamos la cuota.
+            await self._billing.refund(user_id)
+            return AssistantReply(text=f"📄 {exc}")
+
+        pregunta = caption or "Resume este documento y dime lo más importante."
+
+        async def producir() -> str:
+            contexto = (
+                f"El usuario envió el documento PDF «{filename}». "
+                f"Este es su contenido:\n{texto}\n\n"
+                f"Su mensaje sobre el documento: {pregunta}"
+            )
+            history = await self._memory.get(conversation_id)
+            return await self._agent.run(history, contexto)
+
+        return await self._ejecutar(user_id, conversation_id, pregunta, producir, quota)
 
     async def _ejecutar(
         self,

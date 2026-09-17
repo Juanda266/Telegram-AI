@@ -27,6 +27,7 @@ de cada commit.
   diciendo qué herramienta usar o cuál es la respuesta final.
 - `app/ai/openrouter_client.py` + `model_catalog.py` — prueba modelos en
   orden hasta que uno responde, y descubre por API los que son gratis.
+- `app/ai/tools/` — búsqueda web, lectura de páginas, calculadora y PDFs.
 - `app/payments/` — Telegram Stars (principal) y Stripe (opcional).
 - `app/storage/db.py` — SQLite: usuarios, suscripciones, historial.
 
