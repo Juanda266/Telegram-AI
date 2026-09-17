@@ -24,3 +24,6 @@ jobs:
 
       - name: Tests
         run: pytest -q
+
+      - name: Prueba de humo (arranque real del servidor)
+        run: python scripts/smoke_test.py

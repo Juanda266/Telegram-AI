@@ -7,11 +7,13 @@ un hilo aparte (`asyncio.to_thread`) para no bloquear el event loop.
 """
 
 import asyncio
-import datetime as dt
+import contextlib
 import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.clock import utcnow_iso
 
 DEFAULT_DB_PATH = Path("data") / "bot.db"
 
@@ -31,6 +33,16 @@ CREATE TABLE IF NOT EXISTS processed_stripe_events (
     event_id TEXT PRIMARY KEY,
     processed_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
 """
 
 
@@ -56,6 +68,13 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
+
+    @contextlib.contextmanager
+    def cursor(self):
+        """Acceso a la conexión para otros módulos de storage, con el lock
+        y la transacción ya gestionados."""
+        with self._lock, self._conn:
+            yield self._conn
 
     # -- API asíncrona (usada por el resto de la app) ---------------------
 
@@ -121,7 +140,7 @@ class Database:
             if row is None:
                 self._conn.execute(
                     "INSERT INTO users (telegram_user_id, created_at) VALUES (?, ?)",
-                    (telegram_user_id, dt.datetime.utcnow().isoformat()),
+                    (telegram_user_id, utcnow_iso()),
                 )
                 row = self._conn.execute(
                     "SELECT * FROM users WHERE telegram_user_id = ?", (telegram_user_id,)
@@ -194,5 +213,5 @@ class Database:
             self._conn.execute(
                 "INSERT OR IGNORE INTO processed_stripe_events (event_id, processed_at) "
                 "VALUES (?, ?)",
-                (event_id, dt.datetime.utcnow().isoformat()),
+                (event_id, utcnow_iso()),
             )

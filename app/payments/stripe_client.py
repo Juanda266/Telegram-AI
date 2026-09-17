@@ -12,10 +12,11 @@ suscripción. El flujo es:
    actualiza el estado premium del usuario en la base de datos.
 """
 
-import datetime as dt
 import logging
 
 import stripe
+
+from app.clock import from_unix
 
 logger = logging.getLogger(__name__)
 
@@ -83,4 +84,5 @@ class StripeService:
     def period_end_to_iso(period_end_unix: int | None) -> str | None:
         if not period_end_unix:
             return None
-        return dt.datetime.utcfromtimestamp(period_end_unix).isoformat()
+        moment = from_unix(period_end_unix)
+        return moment.isoformat() if moment else None

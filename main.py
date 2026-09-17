@@ -35,9 +35,8 @@ async def run() -> None:
         catalog=FreeModelCatalog(api_key=settings.openrouter_api_key),
     )
     agent = ResearchAgent(client=client, max_steps=settings.max_agent_steps)
-    memory = ConversationMemory(max_messages=settings.max_history_messages)
-
     db = Database(settings.database_path)
+    memory = ConversationMemory(db=db, max_messages=settings.max_history_messages)
     stripe_service = StripeService(
         secret_key=settings.billing.stripe_secret_key,
         webhook_secret=settings.billing.stripe_webhook_secret,

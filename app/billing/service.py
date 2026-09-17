@@ -6,14 +6,10 @@ webhooks de Stripe solo avisan "este usuario pagó / canceló". Toda la
 decisión vive aquí, en un solo lugar.
 """
 
-import datetime as dt
 from dataclasses import dataclass
 
+from app.clock import parse_utc, today_iso, utcnow
 from app.storage.db import Database, UserRecord
-
-
-def _today_utc() -> str:
-    return dt.datetime.utcnow().date().isoformat()
 
 
 def _is_premium_active(user: UserRecord) -> bool:
@@ -22,11 +18,10 @@ def _is_premium_active(user: UserRecord) -> bool:
     if user.premium_until is None:
         # Premium sin fecha de expiración registrada (ej. otorgado a mano).
         return True
-    try:
-        until = dt.datetime.fromisoformat(user.premium_until)
-    except ValueError:
+    until = parse_utc(user.premium_until)
+    if until is None:
         return True
-    return dt.datetime.utcnow() <= until
+    return utcnow() <= until
 
 
 @dataclass(frozen=True)
@@ -54,7 +49,7 @@ class BillingService:
         if _is_premium_active(user):
             return QuotaResult(allowed=True, is_premium=True)
 
-        today = _today_utc()
+        today = today_iso()
         used_today = user.free_used_today if user.free_used_date == today else 0
 
         if used_today >= self._free_daily_messages:
@@ -74,7 +69,7 @@ class BillingService:
                 return f"✨ Tienes suscripción Premium activa hasta {user.premium_until[:10]}."
             return "✨ Tienes suscripción Premium activa (sin fecha de expiración)."
 
-        today = _today_utc()
+        today = today_iso()
         used_today = user.free_used_today if user.free_used_date == today else 0
         remaining = max(self._free_daily_messages - used_today, 0)
         return (

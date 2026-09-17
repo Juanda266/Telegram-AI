@@ -86,7 +86,7 @@ def build_application(
         await update.message.reply_text(WELCOME_MESSAGE)
 
     async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        memory.clear(update.effective_chat.id)
+        await memory.clear(update.effective_chat.id)
         await update.message.reply_text("🧹 Historial borrado. Empecemos de nuevo.")
 
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -154,7 +154,7 @@ def build_application(
         async with chat_locks.acquire(chat_id):
             typing = asyncio.create_task(_keep_typing(context.bot, chat_id))
             try:
-                history = memory.get(chat_id)
+                history = await memory.get(chat_id)
                 reply_text = await agent.run(history, message.text)
             except Exception:
                 logger.exception("Error inesperado procesando el mensaje")
@@ -163,8 +163,8 @@ def build_application(
                     "Intenta de nuevo en unos momentos."
                 )
             else:
-                memory.append(chat_id, {"role": "user", "content": message.text})
-                memory.append(chat_id, {"role": "assistant", "content": reply_text})
+                await memory.append(chat_id, {"role": "user", "content": message.text})
+                await memory.append(chat_id, {"role": "assistant", "content": reply_text})
             finally:
                 typing.cancel()
 
