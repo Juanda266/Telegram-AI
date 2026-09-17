@@ -13,6 +13,7 @@ import logging
 import httpx
 
 from app.ai.model_catalog import FreeModelCatalog
+from app.ai.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,12 @@ class OpenRouterClient:
         site_url: str = "",
         app_name: str = "",
         catalog: FreeModelCatalog | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self._api_key = api_key
         self._models = models
         self._catalog = catalog
+        self._rate_limiter = rate_limiter
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -82,6 +85,9 @@ class OpenRouterClient:
                     "messages": messages,
                     "temperature": temperature,
                 }
+                if self._rate_limiter is not None:
+                    await self._rate_limiter.acquire()
+
                 try:
                     response = await client.post(
                         API_URL, headers=self._headers, json=payload

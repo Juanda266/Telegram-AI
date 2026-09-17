@@ -78,6 +78,7 @@ class Settings:
     admin_user_ids: set[int] = field(default_factory=set)
     max_history_messages: int = 20
     max_agent_steps: int = 6
+    openrouter_requests_per_minute: int = 18
     log_level: str = "INFO"
 
 
@@ -140,6 +141,7 @@ def load_settings() -> Settings:
         admin_user_ids=_parse_allowed_ids(_env("ADMIN_TELEGRAM_USER_IDS")),
         max_history_messages=_env_int("MAX_HISTORY_MESSAGES", 20),
         max_agent_steps=_env_int("MAX_AGENT_STEPS", 6),
+        openrouter_requests_per_minute=_env_int("OPENROUTER_REQUESTS_PER_MINUTE", 18),
         log_level=_env("LOG_LEVEL", "INFO").upper(),
     )
 

@@ -6,6 +6,7 @@ import signal
 from app.ai.agent import ResearchAgent
 from app.ai.model_catalog import FreeModelCatalog
 from app.ai.openrouter_client import OpenRouterClient
+from app.ai.rate_limiter import RateLimiter
 from app.billing.service import BillingService
 from app.config import configure_logging, load_settings
 from app.payments.stripe_client import StripeService
@@ -33,6 +34,7 @@ async def run() -> None:
         site_url=settings.openrouter_site_url,
         app_name=settings.openrouter_app_name,
         catalog=FreeModelCatalog(api_key=settings.openrouter_api_key),
+        rate_limiter=RateLimiter(max_calls=settings.openrouter_requests_per_minute),
     )
     agent = ResearchAgent(client=client, max_steps=settings.max_agent_steps)
     db = Database(settings.database_path)
