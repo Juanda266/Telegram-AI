@@ -18,31 +18,6 @@ logger = logging.getLogger(__name__)
 
 WIKIPEDIA_API_URL = "https://es.wikipedia.org/w/api.php"
 
-TOOL_DEFINITION = {
-    "name": "web_search",
-    "description": (
-        "Busca en la web información actual (noticias, hechos recientes, "
-        "precios, datos que puedan haber cambiado después del entrenamiento "
-        "del modelo, etc). Devuelve una lista de resultados con título, "
-        "URL y un fragmento de texto. Úsala cuando el usuario pregunte algo "
-        "que requiera información actualizada o que no sepas con certeza."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Términos de búsqueda, en el idioma más útil para el tema.",
-            },
-            "max_results": {
-                "type": "integer",
-                "description": "Cantidad de resultados a devolver (por defecto 5, máximo 10).",
-            },
-        },
-        "required": ["query"],
-    },
-}
-
 
 def _search_sync(query: str, max_results: int) -> list[dict[str, str]]:
     with DDGS() as ddgs:

@@ -17,27 +17,6 @@ import operator
 
 logger = logging.getLogger(__name__)
 
-TOOL_DEFINITION = {
-    "name": "calculator",
-    "description": (
-        "Evalúa una expresión matemática y devuelve el resultado exacto. "
-        "Úsala SIEMPRE que la respuesta requiera una operación aritmética "
-        "(porcentajes, conversiones, sumas largas, potencias), en vez de "
-        "calcular mentalmente. Admite + - * / // % **, paréntesis y "
-        "funciones como sqrt, sin, cos, log, abs, round, min, max."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "expression": {
-                "type": "string",
-                "description": "Expresión a evaluar, por ejemplo '(1250 * 1.19) / 3'.",
-            }
-        },
-        "required": ["expression"],
-    },
-}
-
 _OPERADORES_BINARIOS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,

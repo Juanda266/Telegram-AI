@@ -20,26 +20,6 @@ MAX_CHARS = 6000
 TIMEOUT_SECONDS = 15.0
 USER_AGENT = "Mozilla/5.0 (compatible; TelegramAIAssistant/1.0)"
 
-TOOL_DEFINITION = {
-    "name": "web_fetch",
-    "description": (
-        "Descarga una página web y devuelve su texto principal (sin HTML). "
-        "Úsala después de web_search cuando necesites leer el contenido "
-        "completo de un resultado concreto para dar una respuesta más "
-        "precisa o citar detalles."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "URL completa de la página a leer (incluyendo http/https).",
-            }
-        },
-        "required": ["url"],
-    },
-}
-
 
 def _es_destino_permitido(url: str) -> tuple[bool, str]:
     """Comprueba que la URL apunte a internet y no a la red interna.
