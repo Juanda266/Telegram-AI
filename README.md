@@ -8,11 +8,15 @@ además de Telegram.
 ## Cómo funciona
 
 - El "cerebro" es un modelo de lenguaje servido a través de
-  [OpenRouter](https://openrouter.ai), que da acceso gratuito a varios
-  modelos (Llama, Gemini, DeepSeek, Qwen, Mistral, etc.) con una sola API
-  key. El bot está configurado con **una lista de modelos gratuitos**: si
-  el que está usando se queda sin cupo o falla, prueba automáticamente con
-  el siguiente de la lista.
+  [OpenRouter](https://openrouter.ai), que da acceso a decenas de modelos
+  con una sola API key gratuita. Por defecto se usa `openrouter/free`, el
+  router de OpenRouter que reparte las peticiones entre los modelos
+  gratuitos disponibles en ese momento.
+- **Nunca se queda sin modelo:** como la lista de modelos gratis de
+  OpenRouter cambia cada pocas semanas, el bot consulta el catálogo, se
+  queda con los que cuestan 0 y los usa como cadena de respaldo. Si un
+  modelo se queda sin cupo (HTTP 429), falla o devuelve vacío, pasa
+  automáticamente al siguiente.
 - El agente sigue un ciclo tipo *ReAct*: en cada turno decide si necesita
   buscar en la web (`web_search`), leer una página completa (`web_fetch`)
   o si ya puede responder (`final`). Esto funciona con modelos gratuitos
@@ -32,6 +36,7 @@ app/config.py                   Carga y validación de configuración (.env)
 app/telegram_bot.py             Handlers y comandos de Telegram
 app/ai/agent.py                 Bucle del agente (decide buscar o responder)
 app/ai/openrouter_client.py     Cliente a OpenRouter con fallback entre modelos
+app/ai/model_catalog.py         Descubre automáticamente los modelos gratis vigentes
 app/ai/tools/web_search.py      Herramienta de búsqueda (DuckDuckGo)
 app/ai/tools/web_fetch.py       Herramienta para leer el contenido de una URL
 app/billing/service.py          Cuotas del plan gratuito y estado Premium
@@ -119,9 +124,11 @@ ruff check .    # linter
 
 ## Notas sobre el nivel gratuito de OpenRouter
 
-Los modelos `...:free` tienen límites de uso (por minuto y por día) que
-pueden cambiar sin aviso. Por eso el cliente prueba varios modelos en
-orden: si todos fallan al mismo tiempo, el bot avisa al usuario en vez de
+Los modelos gratuitos tienen límites de uso (aproximadamente 20 peticiones
+por minuto y 200 por día) y **qué modelos son gratis cambia con el tiempo**:
+modelos que hoy son gratis mañana pasan a ser de pago. Por eso el bot no
+depende de una lista fija, sino que descubre los modelos gratuitos vigentes
+y los prueba en orden. Si todos fallan a la vez, avisa al usuario en vez de
 quedarse colgado.
 
 ## Roadmap

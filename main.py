@@ -4,6 +4,7 @@ import logging
 import signal
 
 from app.ai.agent import ResearchAgent
+from app.ai.model_catalog import FreeModelCatalog
 from app.ai.openrouter_client import OpenRouterClient
 from app.billing.service import BillingService
 from app.config import configure_logging, load_settings
@@ -31,6 +32,7 @@ async def run() -> None:
         models=settings.openrouter_models,
         site_url=settings.openrouter_site_url,
         app_name=settings.openrouter_app_name,
+        catalog=FreeModelCatalog(api_key=settings.openrouter_api_key),
     )
     agent = ResearchAgent(client=client, max_steps=settings.max_agent_steps)
     memory = ConversationMemory(max_messages=settings.max_history_messages)

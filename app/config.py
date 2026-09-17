@@ -7,13 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_MODELS = (
-    "meta-llama/llama-3.3-70b-instruct:free,"
-    "google/gemini-2.0-flash-exp:free,"
-    "deepseek/deepseek-chat:free,"
-    "mistralai/mistral-small-3.1-24b-instruct:free,"
-    "qwen/qwen-2.5-72b-instruct:free"
-)
+# "openrouter/free" es un router de OpenRouter que elige automáticamente
+# entre los modelos gratuitos disponibles en ese momento. Se usa como opción
+# principal porque la lista concreta de modelos gratis cambia a menudo; si
+# el router fallara, el bot cae a los modelos que descubre por su cuenta
+# (ver app/ai/model_catalog.py).
+DEFAULT_MODELS = "openrouter/free"
 
 
 def _parse_allowed_ids(raw: str) -> set[int]:

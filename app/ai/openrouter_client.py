@@ -12,6 +12,8 @@ import logging
 
 import httpx
 
+from app.ai.model_catalog import FreeModelCatalog
+
 logger = logging.getLogger(__name__)
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -34,9 +36,11 @@ class OpenRouterClient:
         models: list[str],
         site_url: str = "",
         app_name: str = "",
+        catalog: FreeModelCatalog | None = None,
     ) -> None:
         self._api_key = api_key
         self._models = models
+        self._catalog = catalog
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -46,15 +50,33 @@ class OpenRouterClient:
         if app_name:
             self._headers["X-Title"] = app_name
 
+    async def _candidate_models(self) -> list[str]:
+        """Modelos configurados primero y, detrás, los gratuitos descubiertos
+        automáticamente (sin repetir), como red de seguridad extra."""
+        candidates = list(self._models)
+        if self._catalog is None:
+            return candidates
+
+        try:
+            discovered = await self._catalog.get_free_models()
+        except Exception:
+            logger.exception("Fallo al obtener el catálogo de modelos gratuitos")
+            return candidates
+
+        ya_incluidos = set(candidates)
+        candidates.extend(m for m in discovered if m not in ya_incluidos)
+        return candidates
+
     async def chat(self, messages: list[dict], temperature: float = 0.4) -> str:
         """Envía la conversación al primer modelo disponible y devuelve el texto.
 
-        Recorre self._models en orden hasta obtener una respuesta válida.
+        Recorre los modelos candidatos en orden hasta obtener una respuesta válida.
         """
         last_error: Exception | None = None
+        models = await self._candidate_models()
 
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            for model in self._models:
+            for model in models:
                 payload = {
                     "model": model,
                     "messages": messages,
