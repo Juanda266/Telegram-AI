@@ -1,0 +1,21 @@
+# El .env tiene las claves de Telegram, OpenRouter y Stripe: nunca debe
+# acabar dentro de la imagen, que puede compartirse o publicarse.
+.env
+*.env
+!.env.example
+
+# La base de datos con los usuarios y sus suscripciones va en un volumen,
+# no horneada en la imagen.
+data/
+*.db
+
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+tests/
+README.md
