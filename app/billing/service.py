@@ -59,6 +59,17 @@ class BillingService:
         remaining = max(self._free_daily_messages - new_used, 0)
         return QuotaResult(allowed=True, is_premium=False, remaining_free_messages=remaining)
 
+    async def refund(self, telegram_user_id: int) -> None:
+        """Devuelve un mensaje a la cuota gratuita del usuario.
+
+        Se usa cuando la respuesta falla por culpa nuestra (todos los modelos
+        caídos, error interno): sería injusto gastarle un mensaje de su cuota
+        diaria por algo que no pidió.
+        """
+        if not self._billing_enabled:
+            return
+        await self._db.decrement_free_usage(telegram_user_id, today_iso())
+
     async def get_status_text(self, telegram_user_id: int) -> str:
         if not self._billing_enabled:
             return "💚 Este bot no tiene límites de uso configurados."

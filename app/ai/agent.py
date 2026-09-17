@@ -12,7 +12,7 @@ import json
 import logging
 import re
 
-from app.ai.openrouter_client import AllModelsFailedError, OpenRouterClient
+from app.ai.openrouter_client import OpenRouterClient
 from app.ai.tools.web_fetch import web_fetch
 from app.ai.tools.web_search import web_search
 
@@ -87,6 +87,28 @@ def _extract_json(raw_text: str) -> dict:
     raise ValueError(f"No se pudo interpretar la respuesta del modelo: {text[:300]!r}")
 
 
+def _normalize_history(history: list[dict]) -> list[dict]:
+    """Reescribe las respuestas pasadas del bot con el mismo formato JSON que
+    le exigimos al modelo.
+
+    El historial guarda las respuestas ya "limpias" (texto para el usuario).
+    Si se las devolviéramos tal cual, el modelo vería sus propios turnos
+    anteriores incumpliendo el formato que el system prompt le pide, y
+    tendería a imitarlos respondiendo en texto plano.
+    """
+    normalized = []
+    for message in history:
+        if message.get("role") == "assistant":
+            content = json.dumps(
+                {"action": "final", "content": message.get("content", "")},
+                ensure_ascii=False,
+            )
+            normalized.append({"role": "assistant", "content": content})
+        else:
+            normalized.append(message)
+    return normalized
+
+
 class ResearchAgent:
     def __init__(self, client: OpenRouterClient, max_steps: int = 6) -> None:
         self._client = client
@@ -94,19 +116,14 @@ class ResearchAgent:
 
     async def run(self, history: list[dict], user_message: str) -> str:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(history)
+        messages.extend(_normalize_history(history))
         messages.append({"role": "user", "content": user_message})
 
         for step in range(self._max_steps):
-            try:
-                raw_reply = await self._client.chat(messages)
-            except AllModelsFailedError:
-                logger.exception("Todos los modelos de OpenRouter fallaron")
-                return (
-                    "⚠️ No pude contactar a ningún modelo de IA en este momento "
-                    "(puede que se haya agotado el cupo gratuito de todos los "
-                    "modelos configurados). Intenta de nuevo en unos minutos."
-                )
+            # Si ningún modelo responde se propaga AllModelsFailedError: quien
+            # llama necesita distinguir un fallo nuestro de una respuesta real
+            # (por ejemplo, para no gastarle la cuota al usuario).
+            raw_reply = await self._client.chat(messages)
 
             try:
                 action = _extract_json(raw_reply)

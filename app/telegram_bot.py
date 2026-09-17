@@ -14,6 +14,7 @@ from telegram.ext import (
 )
 
 from app.ai.agent import ResearchAgent
+from app.ai.openrouter_client import AllModelsFailedError
 from app.billing.service import BillingService
 from app.clock import today_iso
 from app.config import Settings
@@ -181,11 +182,21 @@ def build_application(
             try:
                 history = await memory.get(chat_id)
                 reply_text = await agent.run(history, message.text)
+            except AllModelsFailedError:
+                logger.exception("Ningún modelo de OpenRouter respondió")
+                # El fallo es nuestro, así que le devolvemos el mensaje a su cuota.
+                await billing.refund(user.id)
+                reply_text = (
+                    "⚠️ Ahora mismo no pude contactar con ningún modelo de IA "
+                    "(seguramente se agotó el cupo gratuito). Este mensaje no "
+                    "te cuenta: prueba de nuevo en unos minutos."
+                )
             except Exception:
                 logger.exception("Error inesperado procesando el mensaje")
+                await billing.refund(user.id)
                 reply_text = (
                     "⚠️ Ocurrió un error inesperado procesando tu mensaje. "
-                    "Intenta de nuevo en unos momentos."
+                    "No te cuenta como consumo; intenta de nuevo en unos momentos."
                 )
             else:
                 await memory.append(chat_id, {"role": "user", "content": message.text})

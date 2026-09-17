@@ -91,3 +91,34 @@ async def test_texto_de_estado(db):
 
     await billing.check_and_consume(10)
     assert "4/5" in await billing.get_status_text(10)
+
+
+@pytest.mark.asyncio
+async def test_refund_devuelve_el_mensaje_a_la_cuota(db):
+    """Si la respuesta falla por un error nuestro, el usuario no debe perder
+    un mensaje de su cuota diaria."""
+    billing = BillingService(db, free_daily_messages=2, billing_enabled=True)
+
+    await billing.check_and_consume(1)
+    await billing.refund(1)
+
+    result = await billing.check_and_consume(1)
+    assert result.remaining_free_messages == 1
+
+
+@pytest.mark.asyncio
+async def test_refund_no_deja_el_contador_en_negativo(db):
+    billing = BillingService(db, free_daily_messages=2, billing_enabled=True)
+    await db.get_or_create_user(1)
+
+    await billing.refund(1)
+    await billing.refund(1)
+
+    result = await billing.check_and_consume(1)
+    assert result.remaining_free_messages == 1
+
+
+@pytest.mark.asyncio
+async def test_refund_sin_facturacion_no_hace_nada(db):
+    billing = BillingService(db, free_daily_messages=2, billing_enabled=False)
+    await billing.refund(999)  # no debe fallar aunque el usuario no exista

@@ -86,6 +86,9 @@ class Database:
             self._increment_free_usage_sync, telegram_user_id, today
         )
 
+    async def decrement_free_usage(self, telegram_user_id: int, today: str) -> None:
+        await asyncio.to_thread(self._decrement_free_usage_sync, telegram_user_id, today)
+
     async def set_premium(
         self,
         telegram_user_id: int,
@@ -166,6 +169,16 @@ class Database:
                 (new_count, today, telegram_user_id),
             )
             return new_count
+
+    def _decrement_free_usage_sync(self, telegram_user_id: int, today: str) -> None:
+        with self._lock, self._conn:
+            # Solo tiene sentido devolver un mensaje si el contador es de hoy;
+            # si ya cambió el día, la cuota se reinició sola.
+            self._conn.execute(
+                "UPDATE users SET free_used_today = MAX(free_used_today - 1, 0) "
+                "WHERE telegram_user_id = ? AND free_used_date = ?",
+                (telegram_user_id, today),
+            )
 
     def _set_premium_sync(
         self,

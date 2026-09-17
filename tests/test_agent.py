@@ -3,6 +3,7 @@ import json
 import pytest
 
 from app.ai.agent import ResearchAgent, _extract_json
+from app.ai.openrouter_client import AllModelsFailedError
 
 
 class FakeClient:
@@ -115,3 +116,39 @@ async def test_final_vacio_devuelve_mensaje_por_defecto():
     agent = ResearchAgent(client=client, max_steps=3)
 
     assert await agent.run([], "hola") == "No tengo una respuesta para eso."
+
+
+@pytest.mark.asyncio
+async def test_historial_del_asistente_se_normaliza_a_json():
+    """El historial guarda texto plano, pero al modelo le exigimos JSON: si
+    viera sus respuestas anteriores en texto plano, imitaría ese formato."""
+    client = FakeClient(['{"action": "final", "content": "ok"}'])
+    agent = ResearchAgent(client=client, max_steps=3)
+    history = [
+        {"role": "user", "content": "pregunta previa"},
+        {"role": "assistant", "content": "respuesta previa"},
+    ]
+
+    await agent.run(history, "nueva pregunta")
+
+    enviado = client.calls[0]
+    assert enviado[1] == {"role": "user", "content": "pregunta previa"}
+    assert json.loads(enviado[2]["content"]) == {
+        "action": "final",
+        "content": "respuesta previa",
+    }
+
+
+@pytest.mark.asyncio
+async def test_fallo_de_todos_los_modelos_se_propaga():
+    """Quien llama necesita distinguir un fallo nuestro de una respuesta real
+    para no gastarle la cuota al usuario."""
+
+    class FailingClient:
+        async def chat(self, messages, temperature: float = 0.4):
+            raise AllModelsFailedError("sin modelos")
+
+    agent = ResearchAgent(client=FailingClient(), max_steps=3)
+
+    with pytest.raises(AllModelsFailedError):
+        await agent.run([], "hola")
