@@ -91,7 +91,11 @@ async def run() -> None:
 
     await application.initialize()
     await application.start()
-    await application.updater.start_polling(allowed_updates=["message"])
+    # "pre_checkout_query" es imprescindible: si no llega, el bot no puede
+    # confirmar los pagos con Telegram Stars y ninguna compra se completa.
+    await application.updater.start_polling(
+        allowed_updates=["message", "pre_checkout_query"]
+    )
     logger.info("Bot listo, escuchando mensajes de Telegram...")
 
     stop_event = asyncio.Event()
