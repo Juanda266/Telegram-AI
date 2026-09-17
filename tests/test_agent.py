@@ -152,3 +152,42 @@ async def test_fallo_de_todos_los_modelos_se_propaga():
 
     with pytest.raises(AllModelsFailedError):
         await agent.run([], "hola")
+
+
+@pytest.mark.asyncio
+async def test_agente_usa_la_calculadora():
+    client = FakeClient(
+        [
+            '{"action": "calculator", "input": {"expression": "1250 * 1.19"}}',
+            '{"action": "final", "content": "Son 1487.5"}',
+        ]
+    )
+    agent = ResearchAgent(client=client, max_steps=3)
+
+    assert await agent.run([], "cuánto es 1250 más IVA") == "Son 1487.5"
+    assert "1487.5" in client.calls[1][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_el_prompt_incluye_la_fecha_actual():
+    """Sin la fecha, el modelo interpreta mal 'hoy' o 'lo último' y confía en
+    un conocimiento interno que puede estar desactualizado."""
+    from app.clock import utcnow
+
+    client = FakeClient(['{"action": "final", "content": "ok"}'])
+    agent = ResearchAgent(client=client, max_steps=1)
+
+    await agent.run([], "qué día es hoy")
+
+    system_prompt = client.calls[0][0]["content"]
+    assert utcnow().strftime("%Y-%m-%d") in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_accion_desconocida_no_rompe_el_bucle():
+    client = FakeClient(['{"action": "inventada", "input": {}}'])
+    agent = ResearchAgent(client=client, max_steps=2)
+
+    resultado = await agent.run([], "hola")
+
+    assert "inventada" in resultado

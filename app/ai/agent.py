@@ -13,39 +13,51 @@ import logging
 import re
 
 from app.ai.openrouter_client import OpenRouterClient
+from app.ai.tools.calculator import calculate
 from app.ai.tools.web_fetch import web_fetch
 from app.ai.tools.web_search import web_search
+from app.clock import utcnow
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_TEMPLATE = """\
 Eres un asistente virtual en Telegram, útil, honesto y directo, capaz de \
 investigar en la web para dar respuestas actualizadas y verificadas (como \
 Gemini o Perplexity). Respondes en el mismo idioma en que te escribe el \
 usuario (por defecto español).
+
+La fecha y hora actual es {fecha_actual} (UTC). Tenla en cuenta al \
+interpretar expresiones como "hoy", "este año" o "lo último", y recuerda \
+que tu conocimiento interno puede estar desactualizado respecto a esta \
+fecha: ante cualquier duda sobre hechos recientes, busca en la web.
 
 Tienes acceso a estas herramientas:
 - web_search(query, max_results?): busca en la web y devuelve título, URL y \
 un fragmento de cada resultado.
 - web_fetch(url): descarga una página y devuelve su texto principal, para \
 leer un resultado con más detalle.
+- calculator(expression): evalúa una expresión matemática con precisión.
 
-Úsalas cuando la pregunta necesite información actual, hechos que puedas no \
-saber con certeza, precios, noticias, eventos recientes, o cuando el \
-usuario pida explícitamente que busques algo. No las uses para saludos, \
-charla casual o preguntas que ya puedes responder con confianza.
+Usa las de búsqueda cuando la pregunta necesite información actual, hechos \
+que puedas no saber con certeza, precios, noticias o eventos recientes, o \
+cuando el usuario pida explícitamente que busques algo. No las uses para \
+saludos, charla casual o preguntas que ya puedes responder con confianza.
+
+Usa la calculadora SIEMPRE que haga falta una operación aritmética, por \
+sencilla que parezca: calcular "de memoria" produce errores.
 
 FORMATO DE RESPUESTA (muy importante): en cada uno de tus turnos debes \
 responder ÚNICAMENTE con un objeto JSON, sin texto antes ni después, con \
 una de estas dos formas:
 
 1. Para usar una herramienta:
-{"action": "web_search", "input": {"query": "..."}}
-{"action": "web_fetch", "input": {"url": "..."}}
+{{"action": "web_search", "input": {{"query": "..."}}}}
+{{"action": "web_fetch", "input": {{"url": "..."}}}}
+{{"action": "calculator", "input": {{"expression": "..."}}}}
 
 2. Para dar la respuesta final al usuario:
-{"action": "final", "content": "Tu respuesta aquí, en texto plano o \
-markdown simple, lista para mostrarse en Telegram."}
+{{"action": "final", "content": "Tu respuesta aquí, en texto plano o \
+markdown simple, lista para mostrarse en Telegram."}}
 
 Reglas:
 - Nunca mezcles texto fuera del JSON.
@@ -57,7 +69,11 @@ antes; no repitas búsquedas innecesarias.
 o URL).
 """
 
-MAX_JSON_REPAIR_ATTEMPTS = 1
+
+def _system_prompt() -> str:
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        fecha_actual=utcnow().strftime("%Y-%m-%d %H:%M")
+    )
 
 
 def _extract_json(raw_text: str) -> dict:
@@ -115,7 +131,7 @@ class ResearchAgent:
         self._max_steps = max_steps
 
     async def run(self, history: list[dict], user_message: str) -> str:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": _system_prompt()}]
         messages.extend(_normalize_history(history))
         messages.append({"role": "user", "content": user_message})
 
@@ -150,6 +166,12 @@ class ResearchAgent:
                 url = tool_input.get("url", "")
                 logger.info("Paso %d: web_fetch(%r)", step + 1, url)
                 observation = await web_fetch(url)
+
+            elif action_type == "calculator":
+                tool_input = action.get("input", {})
+                expression = tool_input.get("expression", "")
+                logger.info("Paso %d: calculator(%r)", step + 1, expression)
+                observation = calculate(expression)
 
             else:
                 logger.warning("Acción desconocida del modelo: %r", action_type)

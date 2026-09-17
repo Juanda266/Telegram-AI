@@ -39,6 +39,7 @@ app/ai/openrouter_client.py     Cliente a OpenRouter con fallback entre modelos
 app/ai/model_catalog.py         Descubre automáticamente los modelos gratis vigentes
 app/ai/tools/web_search.py      Herramienta de búsqueda (DuckDuckGo)
 app/ai/tools/web_fetch.py       Herramienta para leer el contenido de una URL
+app/ai/tools/calculator.py      Calculadora segura (sin eval) para el agente
 app/billing/service.py          Cuotas del plan gratuito y estado Premium
 app/payments/telegram_stars.py  Cobros con Telegram Stars (sin cuenta de comercio)
 app/payments/stripe_client.py   Creación de links de pago y validación de webhooks
