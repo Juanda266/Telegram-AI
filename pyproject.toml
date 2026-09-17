@@ -2,6 +2,9 @@
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# Sin esto, `pytest` a secas no encuentra el paquete `app` (solo lo hallaba
+# `python -m pytest`, que añade el directorio actual al path).
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
