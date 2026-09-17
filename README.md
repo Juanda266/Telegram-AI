@@ -25,6 +25,9 @@ plataformas además de Telegram.
   respaldo si DuckDuckGo limita las peticiones.
 - Los usuarios, su consumo diario y su estado de suscripción se guardan en
   SQLite, para que sobrevivan a reinicios del proceso.
+- La lógica del asistente (cuotas, historial, manejo de errores) vive en
+  `app/assistant.py`, separada de Telegram. Añadir web, WhatsApp o Discord
+  consiste en escribir un adaptador delgado, sin reimplementar nada de eso.
 - Los pagos se cobran con **Telegram Stars** (dentro de la propia app, sin
   cuenta de comercio) o con **Stripe Checkout** (nunca tocamos datos de
   tarjeta). En ambos casos el Premium se activa y se revoca solo.
@@ -34,7 +37,8 @@ plataformas además de Telegram.
 ```
 main.py                        Punto de entrada (bot + servidor de webhooks)
 app/config.py                   Carga y validación de configuración (.env)
-app/telegram_bot.py             Handlers y comandos de Telegram
+app/assistant.py                Lógica del asistente, independiente de plataforma
+app/telegram_bot.py             Adaptador de Telegram (handlers y comandos)
 app/ai/agent.py                 Bucle del agente (decide buscar o responder)
 app/ai/openrouter_client.py     Cliente a OpenRouter con fallback entre modelos
 app/ai/model_catalog.py         Descubre automáticamente los modelos gratis vigentes
@@ -179,4 +183,5 @@ quedarse colgado.
 - [x] Entender imágenes que envíe el usuario
 - [ ] Transcribir audios y notas de voz
 - [ ] Lectura de PDFs
+- [x] Lógica separada de Telegram, lista para otras plataformas
 - [ ] Conectar otras plataformas (web, WhatsApp, Discord)

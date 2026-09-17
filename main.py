@@ -8,6 +8,7 @@ from app.ai.model_catalog import FreeModelCatalog
 from app.ai.openrouter_client import OpenRouterClient
 from app.ai.rate_limiter import RateLimiter
 from app.ai.vision import VisionService
+from app.assistant import Assistant
 from app.billing.service import BillingService
 from app.config import configure_logging, load_settings
 from app.payments.stripe_client import StripeService
@@ -81,8 +82,9 @@ async def run() -> None:
     webhook_app = build_webhook_app(
         stripe_service, WebhookHandler(db=db, stripe_service=stripe_service)
     )
+    assistant = Assistant(agent=agent, memory=memory, billing=billing, vision=vision)
     application = build_application(
-        settings, agent, memory, billing, stripe_service, db, stars_service, vision
+        settings, assistant, billing, stripe_service, db, stars_service
     )
 
     runner = await start_webhook_server(webhook_app, settings.http_port)

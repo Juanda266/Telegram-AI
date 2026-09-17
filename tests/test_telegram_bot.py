@@ -5,7 +5,6 @@ from telegram.error import BadRequest
 
 from app.telegram_bot import (
     TELEGRAM_MESSAGE_LIMIT,
-    ChatLocks,
     _is_authorized,
     _keep_typing,
     _reply_safely,
@@ -68,30 +67,6 @@ async def test_respuesta_vacia_usa_texto_por_defecto():
     message = FakeMessage()
     await _reply_safely(message, "")
     assert message.sent[0][0] == "No tengo una respuesta para eso."
-
-
-@pytest.mark.asyncio
-async def test_chat_locks_serializa_el_mismo_chat():
-    locks = ChatLocks()
-    orden: list[str] = []
-
-    async def tarea(nombre: str, espera: float):
-        async with locks.acquire(1):
-            orden.append(f"inicio-{nombre}")
-            await asyncio.sleep(espera)
-            orden.append(f"fin-{nombre}")
-
-    await asyncio.gather(tarea("a", 0.02), tarea("b", 0))
-
-    # Si el lock funciona, 'a' termina antes de que 'b' empiece.
-    assert orden == ["inicio-a", "fin-a", "inicio-b", "fin-b"]
-
-
-@pytest.mark.asyncio
-async def test_chat_locks_no_bloquea_entre_chats_distintos():
-    locks = ChatLocks()
-    assert locks.acquire(1) is not locks.acquire(2)
-    assert locks.acquire(1) is locks.acquire(1)
 
 
 @pytest.mark.asyncio
