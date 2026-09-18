@@ -246,3 +246,59 @@ async def test_paypal_ignora_eventos_que_no_le_incumben(db, handler):
     )
 
     assert not (await db.get_or_create_user(83)).is_premium
+
+
+@pytest.mark.asyncio
+async def test_paypal_la_renovacion_mensual_mantiene_el_premium(db, handler):
+    """El caso que rompía de verdad: PayPal solo manda
+    BILLING.SUBSCRIPTION.ACTIVATED al dar de alta. Las renovaciones llegan
+    como PAYMENT.SALE.COMPLETED y NO traen el ID de Telegram, solo el de la
+    suscripción. Sin resolverlo, quien sigue pagando perdía el Premium a
+    los 30 días."""
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-alta",
+            "event_type": "BILLING.SUBSCRIPTION.ACTIVATED",
+            "resource": {"id": "I-SUB999", "custom_id": "90"},
+        }
+    )
+    assert (await db.get_or_create_user(90)).is_premium
+
+    # Un mes después llega el cobro de renovación, sin custom_id.
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-renovacion",
+            "event_type": "PAYMENT.SALE.COMPLETED",
+            "resource": {"id": "PAY-1", "billing_agreement_id": "I-SUB999"},
+        }
+    )
+
+    user = await db.get_or_create_user(90)
+    assert user.is_premium
+    assert user.premium_until is not None
+
+
+@pytest.mark.asyncio
+async def test_paypal_guarda_el_id_de_la_suscripcion(db, handler):
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-alta-2",
+            "event_type": "BILLING.SUBSCRIPTION.ACTIVATED",
+            "resource": {"id": "I-ABC", "custom_id": "91"},
+        }
+    )
+
+    encontrado = await db.find_user_by_subscription_id("I-ABC")
+    assert encontrado is not None
+    assert encontrado.telegram_user_id == 91
+
+
+@pytest.mark.asyncio
+async def test_paypal_cobro_de_suscripcion_desconocida_se_ignora(db, handler):
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-huerfano",
+            "event_type": "PAYMENT.SALE.COMPLETED",
+            "resource": {"id": "PAY-2", "billing_agreement_id": "I-NO-EXISTE"},
+        }
+    )  # no debe lanzar excepción ni conceder nada

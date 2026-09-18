@@ -175,8 +175,12 @@ ponerlo como principal y dejar PayPal como alternativa.
 3. Crea un **producto y un plan de suscripción** con el precio mensual que
    quieras cobrar, y copia el ID del plan (`P-...`) en `PAYPAL_PLAN_ID`.
 4. En *Webhooks*, crea uno apuntando a `https://tu-dominio/paypal/webhook`
-   suscrito a los eventos `BILLING.SUBSCRIPTION.*`, y copia su ID en
-   `PAYPAL_WEBHOOK_ID`.
+   y copia su ID en `PAYPAL_WEBHOOK_ID`. **Suscríbelo a los eventos
+   `BILLING.SUBSCRIPTION.*` y también a `PAYMENT.SALE.COMPLETED`**: los
+   primeros avisan del alta y de las bajas, pero las renovaciones
+   mensuales llegan como un pago completado. Sin ese último evento, a tus
+   suscriptores se les acabaría el Premium a los 30 días aunque siguieran
+   pagando.
 5. Pon `BILLING_ENABLED=true` y ajusta `PREMIUM_PRICE_LABEL` al precio real.
 
 Para probarlo sin mover dinero, pon `PAYPAL_SANDBOX=true` y usa las

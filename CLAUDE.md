@@ -28,7 +28,9 @@ de cada commit.
 - `app/ai/openrouter_client.py` + `model_catalog.py` — prueba modelos en
   orden hasta que uno responde, y descubre por API los que son gratis.
 - `app/ai/tools/` — búsqueda web, lectura de páginas, calculadora y PDFs.
-- `app/payments/` — Telegram Stars (principal) y Stripe (opcional).
+- `app/payments/` — métodos de pago intercambiables tras el contrato de
+  `base.py`: Telegram Stars, Wompi, PayPal y Stripe. Los que no tengan
+  credenciales no se le ofrecen al usuario.
 - `app/storage/db.py` — SQLite: usuarios, suscripciones, historial.
 
 ## Decisiones importantes (no deshacer sin motivo)
@@ -38,8 +40,15 @@ de cada commit.
 - **La lista de modelos no se fija a mano**: OpenRouter rota cada pocas
   semanas qué modelos son gratis, y una lista fija deja el bot mudo. Por
   eso `openrouter/free` + descubrimiento automático.
-- **Telegram Stars es el método de pago principal**: Stripe no admite
-  cobros desde Colombia y exige cuenta de comercio.
+- **Se pueden combinar varios métodos de pago**: Stripe no admite cobros
+  desde Colombia, así que las opciones reales allí son Telegram Stars,
+  Wompi y PayPal.
+- **Todo evento de pago se verifica antes de conceder nada**: los webhooks
+  son direcciones públicas. Y se procesan de forma idempotente, porque las
+  pasarelas reintentan.
+- **En PayPal, las renovaciones llegan como `PAYMENT.SALE.COMPLETED`**,
+  no como `BILLING.SUBSCRIPTION.ACTIVATED`, y no traen el ID de Telegram:
+  hay que resolver al usuario por el ID de la suscripción guardado.
 - **La calculadora nunca usa `eval()`**: la expresión viene, en última
   instancia, de lo que escribe un usuario.
 - **`web_fetch` bloquea direcciones internas** (SSRF) y el contenido de la
@@ -49,6 +58,9 @@ de cada commit.
   (`billing.refund`). No cobrarle por nuestros errores.
 - **Fechas siempre vía `app/clock.py`**, en UTC y con zona horaria
   explícita: mezclar naive y aware lanza `TypeError`.
+- **Las columnas nuevas de SQLite se añaden en `_COLUMNAS_NUEVAS`**:
+  `CREATE TABLE IF NOT EXISTS` no toca las bases ya creadas, así que sin
+  esa migración quien ya tuviera el bot corriendo perdería datos.
 
 ## Estilo
 

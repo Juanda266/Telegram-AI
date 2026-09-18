@@ -30,6 +30,13 @@ EVENTOS_DESACTIVAN = {
     "BILLING.SUBSCRIPTION.EXPIRED",
     "BILLING.SUBSCRIPTION.SUSPENDED",
 }
+# Los cobros de renovación NO llegan como BILLING.SUBSCRIPTION.ACTIVATED
+# (ese solo se envía al dar de alta), sino como un pago completado. Sin
+# escucharlos, el Premium de quien sigue pagando expiraría a los 30 días.
+EVENTOS_COBRO = {
+    "PAYMENT.SALE.COMPLETED",
+    "PAYMENT.CAPTURE.COMPLETED",
+}
 
 
 class PayPalService:
@@ -151,3 +158,22 @@ class PayPalService:
             return int(candidato)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def extract_subscription_id(event: dict) -> str | None:
+        """ID de la suscripción (I-...), venga como venga según el evento.
+
+        En el alta es el `id` del recurso; en los cobros de renovación
+        aparece como `billing_agreement_id`.
+        """
+        recurso = event.get("resource") or {}
+        candidato = recurso.get("billing_agreement_id")
+        if candidato:
+            return str(candidato)
+
+        identificador = recurso.get("id")
+        # Los IDs de suscripción de PayPal empiezan por "I-"; el de un pago
+        # no sirve para identificar al suscriptor.
+        if isinstance(identificador, str) and identificador.startswith("I-"):
+            return identificador
+        return None

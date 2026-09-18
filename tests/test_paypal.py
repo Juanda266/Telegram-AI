@@ -152,3 +152,20 @@ async def test_si_paypal_no_responde_se_rechaza(patch_http):
 async def test_sin_webhook_id_no_se_verifica_nada():
     assert not _service(webhook_id="").webhooks_enabled
     assert not await _service(webhook_id="").verify_webhook(CABECERAS, {})
+
+
+def test_id_de_suscripcion_en_el_alta():
+    evento = {"resource": {"id": "I-SUB1", "custom_id": "1"}}
+    assert PayPalService.extract_subscription_id(evento) == "I-SUB1"
+
+
+def test_id_de_suscripcion_en_una_renovacion():
+    """En los cobros el ID del recurso es el del pago, no el de la
+    suscripción: esta viene en billing_agreement_id."""
+    evento = {"resource": {"id": "PAY-9", "billing_agreement_id": "I-SUB1"}}
+    assert PayPalService.extract_subscription_id(evento) == "I-SUB1"
+
+
+def test_un_pago_suelto_no_tiene_suscripcion():
+    assert PayPalService.extract_subscription_id({"resource": {"id": "PAY-9"}}) is None
+    assert PayPalService.extract_subscription_id({}) is None

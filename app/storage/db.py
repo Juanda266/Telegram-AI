@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
 """
 
+# Columnas añadidas después de la primera versión. CREATE TABLE IF NOT
+# EXISTS no toca las tablas que ya existen, así que hay que agregarlas a
+# mano en las bases de datos que ya estén en uso.
+_COLUMNAS_NUEVAS = {
+    "users": {
+        # Identificador de la suscripción en la pasarela (p. ej. el "I-..."
+        # de PayPal). Permite saber a quién corresponde un cobro de
+        # renovación, que no siempre incluye el ID de Telegram.
+        "payment_subscription_id": "TEXT",
+    }
+}
+
 
 @dataclass
 class UserRecord:
@@ -68,6 +80,18 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn:
             self._conn.executescript(_SCHEMA)
+            self._migrar()
+
+    def _migrar(self) -> None:
+        """Agrega las columnas que falten en bases de datos ya existentes."""
+        for tabla, columnas in _COLUMNAS_NUEVAS.items():
+            existentes = {
+                fila["name"]
+                for fila in self._conn.execute(f"PRAGMA table_info({tabla})").fetchall()
+            }
+            for columna, tipo in columnas.items():
+                if columna not in existentes:
+                    self._conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
 
     @contextlib.contextmanager
     def cursor(self):
@@ -104,6 +128,18 @@ class Database:
             premium_until,
             stripe_customer_id,
             stripe_subscription_id,
+        )
+
+    async def set_payment_subscription(
+        self, telegram_user_id: int, subscription_id: str
+    ) -> None:
+        await asyncio.to_thread(
+            self._set_payment_subscription_sync, telegram_user_id, subscription_id
+        )
+
+    async def find_user_by_subscription_id(self, subscription_id: str) -> UserRecord | None:
+        return await asyncio.to_thread(
+            self._find_user_by_subscription_id_sync, subscription_id
         )
 
     async def find_user_by_customer_id(self, stripe_customer_id: str) -> UserRecord | None:
@@ -205,6 +241,22 @@ class Database:
                     telegram_user_id,
                 ),
             )
+
+    def _set_payment_subscription_sync(
+        self, telegram_user_id: int, subscription_id: str
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE users SET payment_subscription_id = ? WHERE telegram_user_id = ?",
+                (subscription_id, telegram_user_id),
+            )
+
+    def _find_user_by_subscription_id_sync(self, subscription_id: str) -> UserRecord | None:
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT * FROM users WHERE payment_subscription_id = ?", (subscription_id,)
+            ).fetchone()
+            return self._row_to_record(row) if row else None
 
     def _find_user_by_customer_id_sync(self, stripe_customer_id: str) -> UserRecord | None:
         with self._lock, self._conn:

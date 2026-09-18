@@ -4,7 +4,12 @@ import datetime as dt
 import logging
 
 from app.clock import utcnow
-from app.payments.paypal import EVENTOS_ACTIVAN, EVENTOS_DESACTIVAN, PayPalService
+from app.payments.paypal import (
+    EVENTOS_ACTIVAN,
+    EVENTOS_COBRO,
+    EVENTOS_DESACTIVAN,
+    PayPalService,
+)
 from app.payments.stripe_client import StripeService
 from app.payments.wompi import WompiService
 from app.storage.db import Database
@@ -81,27 +86,58 @@ class WebhookHandler:
             logger.info("Evento de PayPal %s ya procesado", event_id)
             return
 
-        telegram_user_id = PayPalService.extract_telegram_user_id(event)
-        if telegram_user_id is None:
-            logger.warning("Evento de PayPal %s sin custom_id identificable", event_type)
-            return
-
-        if event_type in EVENTOS_ACTIVAN:
-            await self._db.get_or_create_user(telegram_user_id)
-            # PayPal renueva la suscripción por su cuenta y vuelve a avisar,
-            # así que basta con cubrir hasta el siguiente cobro.
-            hasta = (utcnow() + dt.timedelta(days=DIAS_POR_PAGO)).isoformat()
-            await self._db.set_premium(telegram_user_id, is_premium=True, premium_until=hasta)
-            logger.info("Usuario %s activó Premium con PayPal", telegram_user_id)
-        elif event_type in EVENTOS_DESACTIVAN:
-            await self._db.set_premium(telegram_user_id, is_premium=False, premium_until=None)
-            logger.info("Usuario %s canceló su Premium de PayPal", telegram_user_id)
-        else:
+        if event_type not in EVENTOS_ACTIVAN | EVENTOS_DESACTIVAN | EVENTOS_COBRO:
             logger.debug("Evento de PayPal sin manejar: %s", event_type)
             return
 
+        telegram_user_id = await self._resolver_usuario_paypal(event)
+        if telegram_user_id is None:
+            logger.warning("Evento de PayPal %s sin usuario identificable", event_type)
+            return
+
+        if event_type in EVENTOS_DESACTIVAN:
+            await self._db.set_premium(telegram_user_id, is_premium=False, premium_until=None)
+            logger.info("Usuario %s canceló su Premium de PayPal", telegram_user_id)
+        else:
+            # Tanto el alta como cada renovación conceden un periodo nuevo.
+            await self._db.get_or_create_user(telegram_user_id)
+            hasta = (utcnow() + dt.timedelta(days=DIAS_POR_PAGO)).isoformat()
+            await self._db.set_premium(telegram_user_id, is_premium=True, premium_until=hasta)
+
+            # Guardamos el ID de la suscripción al darla de alta: los cobros
+            # de renovación no traen el ID de Telegram, solo este.
+            suscripcion = PayPalService.extract_subscription_id(event)
+            if suscripcion:
+                await self._db.set_payment_subscription(telegram_user_id, suscripcion)
+
+            logger.info(
+                "Usuario %s tiene Premium con PayPal hasta %s (%s)",
+                telegram_user_id,
+                hasta,
+                event_type,
+            )
+
         if event_id:
             await self._db.mark_event_processed(event_id)
+
+    async def _resolver_usuario_paypal(self, event: dict) -> int | None:
+        """Identifica al usuario de un evento de PayPal.
+
+        El alta de la suscripción trae el ID de Telegram en `custom_id`,
+        pero los cobros de renovación (PAYMENT.SALE.COMPLETED) no: solo
+        traen el ID de la suscripción. Sin esta búsqueda, el Premium de
+        quien sigue pagando expiraría a los 30 días.
+        """
+        telegram_user_id = PayPalService.extract_telegram_user_id(event)
+        if telegram_user_id is not None:
+            return telegram_user_id
+
+        suscripcion = PayPalService.extract_subscription_id(event)
+        if not suscripcion:
+            return None
+
+        user = await self._db.find_user_by_subscription_id(suscripcion)
+        return user.telegram_user_id if user else None
 
     async def _handle_checkout_completed(self, session: dict) -> None:
         telegram_user_id = StripeService.extract_telegram_user_id(session)
