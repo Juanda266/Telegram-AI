@@ -3,7 +3,7 @@ import contextlib
 import logging
 
 from telegram import Update
-from telegram.constants import ChatAction, ParseMode
+from telegram.constants import ChatAction, ChatType, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
@@ -56,6 +56,36 @@ def _mensaje_sin_cuota(settings: Settings) -> str:
         "mensajes ilimitados: usa /suscribirme.\n"
         "O vuelve mañana, tu cuota gratuita se renueva cada día."
     )
+
+
+def _texto_dirigido_al_bot(message, bot_username: str | None) -> str | None:
+    """Devuelve el texto a procesar, o None si el mensaje no era para el bot.
+
+    En un chat privado todo mensaje es para el bot. En un grupo, en cambio,
+    responder a cada mensaje sería molesto y consumiría la cuota compartida
+    de OpenRouter con conversaciones que no van con él, así que solo
+    contesta si lo mencionan o si le responden a un mensaje suyo.
+    """
+    texto = message.text or message.caption or ""
+
+    if message.chat.type == ChatType.PRIVATE:
+        return texto
+
+    respondiendo_al_bot = (
+        message.reply_to_message is not None
+        and message.reply_to_message.from_user is not None
+        and message.reply_to_message.from_user.is_bot
+    )
+    mencion = f"@{bot_username}" if bot_username else None
+
+    if mencion and mencion in texto:
+        # Se quita la mención para que no ensucie la pregunta.
+        return texto.replace(mencion, " ").strip()
+
+    if respondiendo_al_bot:
+        return texto
+
+    return None
 
 
 async def _keep_typing(bot, chat_id: int) -> None:
@@ -233,6 +263,12 @@ def build_application(
             await message.reply_text("🚫 No tienes autorización para usar este bot.")
             return
 
+        # En un grupo, responder a todo sería molesto y agotaría la cuota
+        # compartida de OpenRouter con conversaciones ajenas al bot.
+        texto = _texto_dirigido_al_bot(message, context.bot.username)
+        if texto is None:
+            return
+
         chat_id = update.effective_chat.id
         # El indicador de "escribiendo..." se mantiene mientras el asistente
         # investiga: Telegram lo apaga solo a los ~5 segundos.
@@ -256,7 +292,7 @@ def build_application(
                     message.caption,
                 )
             else:
-                reply = await assistant.handle_text(user.id, chat_id, message.text)
+                reply = await assistant.handle_text(user.id, chat_id, texto)
         finally:
             typing.cancel()
 

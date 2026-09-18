@@ -8,6 +8,7 @@ from app.telegram_bot import (
     _is_authorized,
     _keep_typing,
     _reply_safely,
+    _texto_dirigido_al_bot,
 )
 
 
@@ -85,3 +86,59 @@ async def test_keep_typing_reenvia_hasta_cancelarse(monkeypatch):
 
     assert len(llamadas) > 1
     assert set(llamadas) == {42}
+
+
+class FakeChat:
+    def __init__(self, tipo):
+        self.type = tipo
+
+
+class FakeUser:
+    def __init__(self, is_bot=False):
+        self.is_bot = is_bot
+
+
+class FakeIncoming:
+    def __init__(self, texto="", tipo="private", reply_de=None, caption=None):
+        self.text = texto
+        self.caption = caption
+        self.chat = FakeChat(tipo)
+        self.reply_to_message = reply_de
+
+
+def test_en_privado_responde_a_todo():
+    mensaje = FakeIncoming("hola", tipo="private")
+    assert _texto_dirigido_al_bot(mensaje, "mibot") == "hola"
+
+
+def test_en_grupo_ignora_lo_que_no_va_con_el():
+    """Responder a todo en un grupo sería molesto y agotaría la cuota
+    compartida de OpenRouter con conversaciones ajenas."""
+    mensaje = FakeIncoming("nos vemos mañana", tipo="group")
+    assert _texto_dirigido_al_bot(mensaje, "mibot") is None
+
+
+def test_en_grupo_responde_si_lo_mencionan():
+    mensaje = FakeIncoming("@mibot ¿qué hora es?", tipo="group")
+    assert _texto_dirigido_al_bot(mensaje, "mibot") == "¿qué hora es?"
+
+
+def test_en_grupo_responde_si_le_contestan():
+    respuesta_del_bot = FakeIncoming(tipo="group")
+    respuesta_del_bot.from_user = FakeUser(is_bot=True)
+    mensaje = FakeIncoming("¿y eso por qué?", tipo="group", reply_de=respuesta_del_bot)
+
+    assert _texto_dirigido_al_bot(mensaje, "mibot") == "¿y eso por qué?"
+
+
+def test_en_grupo_ignora_respuestas_a_otras_personas():
+    mensaje_de_persona = FakeIncoming(tipo="group")
+    mensaje_de_persona.from_user = FakeUser(is_bot=False)
+    mensaje = FakeIncoming("claro", tipo="group", reply_de=mensaje_de_persona)
+
+    assert _texto_dirigido_al_bot(mensaje, "mibot") is None
+
+
+def test_usa_el_pie_de_foto_cuando_no_hay_texto():
+    mensaje = FakeIncoming(texto=None, tipo="private", caption="¿qué es esto?")
+    assert _texto_dirigido_al_bot(mensaje, "mibot") == "¿qué es esto?"
