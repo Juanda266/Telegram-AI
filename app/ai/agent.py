@@ -109,6 +109,16 @@ def _extract_json(raw_text: str) -> dict:
     raise ValueError(f"No se pudo interpretar la respuesta del modelo: {text[:300]!r}")
 
 
+MAX_REINTENTOS_FORMATO = 1
+
+RECORDATORIO_FORMATO = (
+    "Tu respuesta anterior no era un objeto JSON válido. Vuelve a "
+    "responder usando ÚNICAMENTE JSON, sin texto antes ni después. Si ya "
+    "tienes la respuesta para el usuario, usa exactamente este formato: "
+    '{"action": "final", "content": "tu respuesta aquí"}'
+)
+
+
 def _envolver_observacion(observation: str) -> str:
     """Envuelve el resultado de una herramienta marcándolo como datos.
 
@@ -162,6 +172,8 @@ class ResearchAgent:
         messages.extend(_normalize_history(history))
         messages.append({"role": "user", "content": user_message})
 
+        reintentos_formato = 0
+
         for step in range(self._max_steps):
             # Si ningún modelo responde se propaga AllModelsFailedError: quien
             # llama necesita distinguir un fallo nuestro de una respuesta real
@@ -171,7 +183,17 @@ class ResearchAgent:
             try:
                 action = _extract_json(raw_reply)
             except ValueError:
-                logger.warning("Respuesta no-JSON del modelo, se devuelve tal cual")
+                # Los modelos gratuitos se salen del formato con cierta
+                # frecuencia. Antes de rendirse, se les señala el error: casi
+                # siempre lo corrigen al segundo intento.
+                if reintentos_formato < MAX_REINTENTOS_FORMATO:
+                    reintentos_formato += 1
+                    logger.info("El modelo no respondió en JSON, se le pide corregirlo")
+                    messages.append({"role": "assistant", "content": raw_reply})
+                    messages.append({"role": "user", "content": RECORDATORIO_FORMATO})
+                    continue
+
+                logger.warning("El modelo insiste en no usar JSON, se devuelve su texto")
                 return raw_reply.strip()
 
             action_type = action.get("action")

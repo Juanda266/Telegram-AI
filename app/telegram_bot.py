@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import datetime as dt
 import logging
 
 from telegram import Update
@@ -16,7 +17,7 @@ from telegram.ext import (
 
 from app.assistant import Assistant
 from app.billing.service import BillingService
-from app.clock import today_iso
+from app.clock import today_iso, utcnow
 from app.config import Settings
 from app.payments.stripe_client import StripeNotConfiguredError, StripeService
 from app.payments.telegram_stars import TelegramStarsService
@@ -138,6 +139,30 @@ def build_application(
             f"Activos hoy: {stats['activos_hoy']}\n"
             f"Mensajes hoy: {stats['mensajes_hoy']}",
             parse_mode=ParseMode.MARKDOWN,
+        )
+
+    async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Regala Premium a alguien: para compensar un fallo o dar acceso
+        a un conocido sin pasar por el cobro."""
+        if update.effective_user.id not in settings.admin_user_ids:
+            await update.message.reply_text("🚫 Este comando es solo para administradores.")
+            return
+
+        try:
+            user_id = int(context.args[0])
+            dias = int(context.args[1]) if len(context.args) > 1 else 30
+        except (IndexError, ValueError):
+            await update.message.reply_text(
+                "Uso: /regalar <id_de_telegram> [días]\n"
+                "Ejemplo: /regalar 123456789 30"
+            )
+            return
+
+        hasta = (utcnow() + dt.timedelta(days=dias)).isoformat()
+        await db.get_or_create_user(user_id)
+        await db.set_premium(user_id, is_premium=True, premium_until=hasta)
+        await update.message.reply_text(
+            f"✨ Listo: el usuario {user_id} tiene Premium hasta el {hasta[:10]}."
         )
 
     async def delete_data_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -318,6 +343,7 @@ def build_application(
     application.add_handler(
         CommandHandler(["borrar_datos", "olvidame"], delete_data_command)
     )
+    application.add_handler(CommandHandler(["regalar", "grant"], grant_command))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(
         MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback)

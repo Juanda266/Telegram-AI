@@ -82,7 +82,9 @@ tests/                          Tests (pytest)
    docker run --env-file .env -p 8080:8080 telegram-ai
    ```
 
-5. Escríbele a tu bot en Telegram. Entiende:
+5. Escríbele a tu bot en Telegram. En chats privados responde a todo; en
+   grupos, solo si lo mencionas (`@tubot ...`) o respondes a un mensaje
+   suyo. Entiende:
    - **Texto:** preguntas normales; busca en la web cuando hace falta.
    - **Fotos:** las analiza y responde sobre lo que ve, incluido el texto
      que aparezca en ellas.
@@ -99,6 +101,7 @@ tests/                          Tests (pytest)
 | `/suscribirme` | Envía la factura del plan Premium |
 | `/borrar_datos` | Borra todo lo que el bot guarda sobre ti |
 | `/stats` | Solo administradores: usuarios, suscriptores y uso del día |
+| `/regalar <id> [días]` | Solo administradores: da Premium a alguien sin cobrarle |
 
 Para usar `/stats` pon tu ID de Telegram en `ADMIN_TELEGRAM_USER_IDS`
 (puedes averiguarlo escribiéndole a [@userinfobot](https://t.me/userinfobot)).

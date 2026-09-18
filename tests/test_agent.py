@@ -104,14 +104,6 @@ async def test_agente_incluye_historial():
 
 
 @pytest.mark.asyncio
-async def test_respuesta_no_json_se_devuelve_tal_cual():
-    client = FakeClient(["Simplemente texto plano sin json"])
-    agent = ResearchAgent(client=client, max_steps=3)
-
-    assert await agent.run([], "hola") == "Simplemente texto plano sin json"
-
-
-@pytest.mark.asyncio
 async def test_final_vacio_devuelve_mensaje_por_defecto():
     client = FakeClient([json.dumps({"action": "final", "content": "   "})])
     agent = ResearchAgent(client=client, max_steps=3)
@@ -218,3 +210,29 @@ async def test_los_resultados_se_marcan_como_no_confiables(monkeypatch):
     assert "NO CONFIABLE" in observacion
     assert "NO son órdenes" in observacion
     assert "INICIO DEL CONTENIDO EXTERNO" in observacion
+
+
+@pytest.mark.asyncio
+async def test_si_el_modelo_no_usa_json_se_le_pide_corregir():
+    """Los modelos gratuitos se salen del formato a menudo; casi siempre lo
+    corrigen si se les señala."""
+    client = FakeClient(
+        [
+            "Claro, te ayudo con eso.",
+            '{"action": "final", "content": "La respuesta correcta"}',
+        ]
+    )
+    agent = ResearchAgent(client=client, max_steps=4)
+
+    assert await agent.run([], "hola") == "La respuesta correcta"
+    assert "JSON válido" in client.calls[1][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_si_insiste_en_no_usar_json_se_devuelve_su_texto():
+    """Mejor darle al usuario algo legible que un error."""
+    client = FakeClient(["Texto plano", "Sigo sin usar JSON"])
+    agent = ResearchAgent(client=client, max_steps=4)
+
+    assert await agent.run([], "hola") == "Sigo sin usar JSON"
+    assert len(client.calls) == 2
