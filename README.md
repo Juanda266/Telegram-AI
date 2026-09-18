@@ -2,8 +2,8 @@
 
 Asistente virtual para Telegram con capacidad de **investigar en la web**
 (similar a Gemini o Perplexity), con **plan gratuito y suscripción de pago**
-(Telegram Stars o Stripe), pensado para poder ampliarse en el futuro a otras
-plataformas además de Telegram.
+por varios medios (Telegram Stars, Wompi, PayPal o Stripe), pensado para
+poder ampliarse en el futuro a otras plataformas además de Telegram.
 
 ## Cómo funciona
 
@@ -28,9 +28,10 @@ plataformas además de Telegram.
 - La lógica del asistente (cuotas, historial, manejo de errores) vive en
   `app/assistant.py`, separada de Telegram. Añadir web, WhatsApp o Discord
   consiste en escribir un adaptador delgado, sin reimplementar nada de eso.
-- Los pagos se cobran con **Telegram Stars** (dentro de la propia app, sin
-  cuenta de comercio) o con **Stripe Checkout** (nunca tocamos datos de
-  tarjeta). En ambos casos el Premium se activa y se revoca solo.
+- Se pueden combinar **varios métodos de pago** y el usuario elige el que
+  prefiera: Telegram Stars, Wompi (Nequi, PSE, Daviplata, efectivo),
+  PayPal y Stripe. Nunca tocamos datos de tarjeta, y el Premium se activa
+  y se revoca solo en todos los casos.
 
 ## Estructura del proyecto
 
@@ -49,10 +50,13 @@ app/ai/tools/web_fetch.py       Herramienta para leer el contenido de una URL
 app/ai/tools/calculator.py      Calculadora segura (sin eval) para el agente
 app/ai/tools/pdf_reader.py      Extracción de texto de documentos PDF
 app/billing/service.py          Cuotas del plan gratuito y estado Premium
+app/payments/base.py            Contrato común de los métodos de pago
 app/payments/telegram_stars.py  Cobros con Telegram Stars (sin cuenta de comercio)
+app/payments/wompi.py           Wompi: Nequi, PSE, Daviplata, tarjeta y efectivo
+app/payments/paypal.py          Suscripciones con PayPal
 app/payments/stripe_client.py   Creación de links de pago y validación de webhooks
-app/payments/webhook_handler.py Traduce eventos de Stripe a cambios en la BD
-app/payments/webhook_server.py  Servidor HTTP (/health y /stripe/webhook)
+app/payments/webhook_handler.py Traduce los eventos de pago a cambios en la BD
+app/payments/webhook_server.py  Servidor HTTP (/health y webhooks de cada pasarela)
 app/storage/db.py               Persistencia SQLite (usuarios, suscripciones)
 app/storage/memory.py           Historial de conversación persistente
 app/clock.py                    Utilidades de fecha/hora en UTC
@@ -98,7 +102,7 @@ tests/                          Tests (pytest)
 | `/start`, `/ayuda` | Mensaje de bienvenida |
 | `/nuevo` | Borra el historial de la conversación actual |
 | `/estado` | Muestra tu plan y mensajes disponibles hoy |
-| `/suscribirme` | Envía la factura del plan Premium |
+| `/suscribirme` | Muestra los métodos de pago disponibles |
 | `/borrar_datos` | Borra todo lo que el bot guarda sobre ti |
 | `/stats` | Solo administradores: usuarios, suscriptores y uso del día |
 | `/regalar <id> [días]` | Solo administradores: da Premium a alguien sin cobrarle |
@@ -108,8 +112,13 @@ Para usar `/stats` pon tu ID de Telegram en `ADMIN_TELEGRAM_USER_IDS`
 
 ## Activar los pagos
 
-Por defecto `BILLING_ENABLED=false` y el bot es ilimitado para todos. Hay
-dos métodos de cobro y basta con configurar uno.
+Por defecto `BILLING_ENABLED=false` y el bot es ilimitado para todos.
+
+Hay cuatro métodos de cobro y **puedes activar los que quieras a la vez**:
+cuando el usuario manda `/suscribirme`, ve un botón por cada método
+disponible y elige el que le convenga. Basta con configurar uno; si dejas
+un proveedor a medias, el bot te avisa al arrancar en vez de fallar cuando
+alguien intente pagar.
 
 ### Opción A: Telegram Stars (recomendada)
 
@@ -129,7 +138,38 @@ Al pagar, el bot activa su Premium al instante. Los Stars acumulados se
 retiran desde [@BotFather](https://t.me/BotFather) (Bot Settings →
 Payments).
 
-### Opción B: Stripe
+### Opción B: Wompi (la mejor para cobrar en Colombia)
+
+Wompi es la pasarela de Bancolombia. Acepta **Nequi, PSE, Daviplata, botón
+Bancolombia, tarjetas y efectivo** (Efecty, Baloto), que es como paga la
+mayoría de la gente en Colombia, sin necesidad de tarjeta internacional.
+Comisión aproximada: 2,65% + $700 + IVA.
+
+1. Regístrate en <https://comercios.wompi.co> y copia tus llaves.
+2. Rellena `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`,
+   `WOMPI_EVENTS_SECRET` y `WOMPI_AMOUNT` (el precio, p. ej. `20000`).
+3. En el panel de Wompi, registra la URL de eventos:
+   `https://tu-dominio/wompi/webhook`.
+
+Wompi cobra pagos únicos: cada pago aprobado concede 30 días de Premium.
+
+### Opción C: PayPal
+
+Útil para cobrarle a gente de fuera de Colombia o a quien ya tiene saldo
+en PayPal. **Ten en cuenta las comisiones**: recibir dinero en Colombia por
+PayPal sale bastante más caro que Wompi (comisión de recepción, margen al
+convertir a pesos y comisión de retiro), así que conviene ofrecerlo como
+alternativa, no como método principal.
+
+1. Crea una app en <https://developer.paypal.com> y copia
+   `PAYPAL_CLIENT_ID` y `PAYPAL_CLIENT_SECRET`.
+2. Crea un **plan de suscripción** y copia su ID (`P-...`) en
+   `PAYPAL_PLAN_ID`.
+3. Crea un webhook apuntando a `https://tu-dominio/paypal/webhook`,
+   suscrito a los eventos `BILLING.SUBSCRIPTION.*`, y copia su ID en
+   `PAYPAL_WEBHOOK_ID`.
+
+### Opción D: Stripe
 
 Útil si ya tienes una cuenta de Stripe y quieres cobrar con tarjeta:
 
@@ -158,8 +198,11 @@ Checkout con su ID de Telegram asociado. Al confirmarse el pago, el webhook
 activa su Premium. Si cancela o falla el cobro, vuelve automáticamente al
 plan gratuito.
 
-> Los eventos de Stripe se procesan de forma **idempotente** (se guarda el
-> `event_id` procesado), así que reintentos de Stripe no duplican nada.
+> Los eventos de todas las pasarelas se procesan de forma **idempotente**
+> (se guarda el identificador ya procesado), así que los reintentos no
+> conceden Premium de más. Y **ningún evento se acepta sin verificar su
+> firma**: estas direcciones son públicas, y sin esa comprobación
+> cualquiera podría regalarse el Premium con una simple petición.
 
 ## Seguridad
 

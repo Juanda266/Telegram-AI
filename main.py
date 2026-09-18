@@ -11,10 +11,12 @@ from app.ai.vision import VisionService
 from app.assistant import Assistant
 from app.billing.service import BillingService
 from app.config import configure_logging, load_settings
+from app.payments.paypal import PayPalService
 from app.payments.stripe_client import StripeService
 from app.payments.telegram_stars import TelegramStarsService
 from app.payments.webhook_handler import WebhookHandler
 from app.payments.webhook_server import build_webhook_app, start_webhook_server
+from app.payments.wompi import WompiService
 from app.storage.db import Database
 from app.storage.memory import ConversationMemory
 from app.telegram_bot import build_application
@@ -60,6 +62,26 @@ async def run() -> None:
         success_url=settings.billing.stripe_success_url,
         cancel_url=settings.billing.stripe_cancel_url,
     )
+    wompi_service = WompiService(
+        public_key=settings.billing.wompi_public_key,
+        integrity_secret=settings.billing.wompi_integrity_secret,
+        events_secret=settings.billing.wompi_events_secret,
+        amount=settings.billing.wompi_amount,
+        currency=settings.billing.wompi_currency,
+        redirect_url=settings.billing.return_url,
+    )
+    paypal_service = PayPalService(
+        client_id=settings.billing.paypal_client_id,
+        client_secret=settings.billing.paypal_client_secret,
+        plan_id=settings.billing.paypal_plan_id,
+        webhook_id=settings.billing.paypal_webhook_id,
+        return_url=settings.billing.return_url,
+        cancel_url=settings.billing.return_url,
+        sandbox=settings.billing.paypal_sandbox,
+    )
+    # El orden es el que verá el usuario: primero lo más cómodo en Colombia.
+    payment_providers = [wompi_service, paypal_service, stripe_service]
+
     stars_service = TelegramStarsService(
         price_stars=settings.billing.stars_price,
         as_subscription=settings.billing.stars_as_subscription,
@@ -71,20 +93,27 @@ async def run() -> None:
     )
 
     if settings.billing.enabled:
+        metodos = ["Telegram Stars"] if stars_service.enabled else []
+        metodos += [p.name for p in payment_providers if p.enabled]
         logger.info(
-            "Facturación activa: %s mensajes gratis al día, Premium %s",
+            "Facturación activa: %s mensajes gratis al día, Premium %s. "
+            "Métodos de pago: %s",
             settings.billing.free_daily_messages,
             settings.billing.premium_price_label,
+            ", ".join(metodos),
         )
     else:
         logger.info("Facturación desactivada: uso ilimitado para todos los usuarios")
 
     webhook_app = build_webhook_app(
-        stripe_service, WebhookHandler(db=db, stripe_service=stripe_service)
+        stripe_service,
+        WebhookHandler(db=db, stripe_service=stripe_service),
+        wompi_service=wompi_service,
+        paypal_service=paypal_service,
     )
     assistant = Assistant(agent=agent, memory=memory, billing=billing, vision=vision)
     application = build_application(
-        settings, assistant, billing, stripe_service, db, stars_service
+        settings, assistant, billing, stripe_service, db, stars_service, payment_providers
     )
 
     runner = await start_webhook_server(webhook_app, settings.http_port)

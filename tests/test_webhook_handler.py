@@ -156,3 +156,93 @@ async def test_status_impagado_desactiva_premium(db, handler):
     )
 
     assert not (await db.get_or_create_user(60)).is_premium
+
+
+def _evento_wompi(user_id=77, estado="APPROVED", tx_id="tx-1"):
+    return {
+        "event": "transaction.updated",
+        "data": {
+            "transaction": {
+                "id": tx_id,
+                "status": estado,
+                "reference": f"premium-{user_id}-20260101000000",
+                "amount_in_cents": 2000000,
+            }
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_wompi_aprobado_activa_premium(db, handler):
+    await handler.handle_wompi_event(_evento_wompi(user_id=77))
+
+    user = await db.get_or_create_user(77)
+    assert user.is_premium
+    assert user.premium_until is not None
+
+
+@pytest.mark.asyncio
+async def test_wompi_rechazado_no_activa_nada(db, handler):
+    await handler.handle_wompi_event(_evento_wompi(user_id=78, estado="DECLINED"))
+
+    assert not (await db.get_or_create_user(78)).is_premium
+
+
+@pytest.mark.asyncio
+async def test_wompi_no_procesa_dos_veces_la_misma_transaccion(db, handler):
+    """Wompi reintenta los eventos: no debe regalar Premium de más."""
+    await handler.handle_wompi_event(_evento_wompi(user_id=79, tx_id="tx-repe"))
+    await db.set_premium(79, is_premium=False, premium_until=None)
+    await handler.handle_wompi_event(_evento_wompi(user_id=79, tx_id="tx-repe"))
+
+    assert not (await db.get_or_create_user(79)).is_premium
+
+
+@pytest.mark.asyncio
+async def test_wompi_con_referencia_ajena_se_ignora(db, handler):
+    evento = _evento_wompi()
+    evento["data"]["transaction"]["reference"] = "otra-cosa"
+
+    await handler.handle_wompi_event(evento)  # no debe lanzar excepción
+
+
+@pytest.mark.asyncio
+async def test_paypal_activado_da_premium(db, handler):
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-pp-1",
+            "event_type": "BILLING.SUBSCRIPTION.ACTIVATED",
+            "resource": {"custom_id": "81"},
+        }
+    )
+
+    assert (await db.get_or_create_user(81)).is_premium
+
+
+@pytest.mark.asyncio
+async def test_paypal_cancelado_quita_premium(db, handler):
+    await db.get_or_create_user(82)
+    await db.set_premium(82, is_premium=True, premium_until=None)
+
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-pp-2",
+            "event_type": "BILLING.SUBSCRIPTION.CANCELLED",
+            "resource": {"custom_id": "82"},
+        }
+    )
+
+    assert not (await db.get_or_create_user(82)).is_premium
+
+
+@pytest.mark.asyncio
+async def test_paypal_ignora_eventos_que_no_le_incumben(db, handler):
+    await handler.handle_paypal_event(
+        {
+            "id": "evt-pp-3",
+            "event_type": "PAYMENT.CAPTURE.PENDING",
+            "resource": {"custom_id": "83"},
+        }
+    )
+
+    assert not (await db.get_or_create_user(83)).is_premium

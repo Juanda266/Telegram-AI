@@ -64,6 +64,17 @@ class BillingSettings:
     premium_price_label: str
     stars_price: int
     stars_as_subscription: bool
+    wompi_public_key: str
+    wompi_integrity_secret: str
+    wompi_events_secret: str
+    wompi_amount: int
+    wompi_currency: str
+    paypal_client_id: str
+    paypal_client_secret: str
+    paypal_plan_id: str
+    paypal_webhook_id: str
+    paypal_sandbox: bool
+    return_url: str
 
 
 @dataclass(frozen=True)
@@ -86,30 +97,49 @@ class Settings:
 
 def _validar_metodos_de_pago(billing: "BillingSettings") -> None:
     """Con la facturación activa hace falta al menos un método de pago
-    completo: Telegram Stars o Stripe."""
-    stars_listo = billing.stars_price > 0
+    completo. Se pueden combinar todos los que se quiera.
 
-    variables_stripe = {
-        "STRIPE_SECRET_KEY": billing.stripe_secret_key,
-        "STRIPE_PRICE_ID": billing.stripe_price_id,
-        "STRIPE_WEBHOOK_SECRET": billing.stripe_webhook_secret,
+    Un proveedor configurado a medias se considera un error de despiste y
+    se avisa al arrancar, en vez de fallar cuando alguien intente pagar.
+    """
+    grupos = {
+        "Stripe": {
+            "STRIPE_SECRET_KEY": billing.stripe_secret_key,
+            "STRIPE_PRICE_ID": billing.stripe_price_id,
+            "STRIPE_WEBHOOK_SECRET": billing.stripe_webhook_secret,
+        },
+        "Wompi": {
+            "WOMPI_PUBLIC_KEY": billing.wompi_public_key,
+            "WOMPI_INTEGRITY_SECRET": billing.wompi_integrity_secret,
+            "WOMPI_EVENTS_SECRET": billing.wompi_events_secret,
+            "WOMPI_AMOUNT": str(billing.wompi_amount) if billing.wompi_amount else "",
+        },
+        "PayPal": {
+            "PAYPAL_CLIENT_ID": billing.paypal_client_id,
+            "PAYPAL_CLIENT_SECRET": billing.paypal_client_secret,
+            "PAYPAL_PLAN_ID": billing.paypal_plan_id,
+            "PAYPAL_WEBHOOK_ID": billing.paypal_webhook_id,
+        },
     }
-    faltantes_stripe = [nombre for nombre, valor in variables_stripe.items() if not valor]
-    stripe_listo = not faltantes_stripe
-    stripe_a_medias = faltantes_stripe and len(faltantes_stripe) < len(variables_stripe)
 
-    if stripe_a_medias:
-        raise RuntimeError(
-            f"Stripe está configurado a medias, falta: {', '.join(faltantes_stripe)}. "
-            "Complétalas o bórralas todas para usar solo Telegram Stars."
-        )
+    configurados = ["Telegram Stars"] if billing.stars_price > 0 else []
 
-    if not stars_listo and not stripe_listo:
+    for proveedor, variables in grupos.items():
+        faltantes = [nombre for nombre, valor in variables.items() if not valor]
+        if not faltantes:
+            configurados.append(proveedor)
+        elif len(faltantes) < len(variables):
+            raise RuntimeError(
+                f"{proveedor} está configurado a medias, falta: "
+                f"{', '.join(faltantes)}. Complétalas o bórralas todas."
+            )
+
+    if not configurados:
         raise RuntimeError(
             "BILLING_ENABLED=true pero no hay ningún método de pago configurado. "
-            "Define TELEGRAM_STARS_PRICE (recomendado: se cobra dentro de "
-            "Telegram, sin cuenta de comercio) o las variables de Stripe, "
-            "o pon BILLING_ENABLED=false."
+            "Puedes usar TELEGRAM_STARS_PRICE (lo más simple: se cobra dentro "
+            "de Telegram), Wompi (Nequi, PSE y efectivo en Colombia), PayPal o "
+            "Stripe. También puedes poner BILLING_ENABLED=false."
         )
 
 
@@ -139,6 +169,17 @@ def load_settings() -> Settings:
         premium_price_label=_env("PREMIUM_PRICE_LABEL", "5 USD/mes"),
         stars_price=_env_int("TELEGRAM_STARS_PRICE", 0),
         stars_as_subscription=_env_bool("TELEGRAM_STARS_SUBSCRIPTION", True),
+        wompi_public_key=_env("WOMPI_PUBLIC_KEY"),
+        wompi_integrity_secret=_env("WOMPI_INTEGRITY_SECRET"),
+        wompi_events_secret=_env("WOMPI_EVENTS_SECRET"),
+        wompi_amount=_env_int("WOMPI_AMOUNT", 0),
+        wompi_currency=_env("WOMPI_CURRENCY", "COP"),
+        paypal_client_id=_env("PAYPAL_CLIENT_ID"),
+        paypal_client_secret=_env("PAYPAL_CLIENT_SECRET"),
+        paypal_plan_id=_env("PAYPAL_PLAN_ID"),
+        paypal_webhook_id=_env("PAYPAL_WEBHOOK_ID"),
+        paypal_sandbox=_env_bool("PAYPAL_SANDBOX", False),
+        return_url=_env("PAYMENT_RETURN_URL", "https://t.me"),
     )
 
     if billing.enabled:

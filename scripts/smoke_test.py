@@ -33,6 +33,7 @@ from app.config import load_settings  # noqa: E402
 from app.payments.stripe_client import StripeService  # noqa: E402
 from app.payments.webhook_handler import WebhookHandler  # noqa: E402
 from app.payments.webhook_server import build_webhook_app, start_webhook_server  # noqa: E402
+from app.payments.wompi import WompiService  # noqa: E402
 from app.storage.db import Database  # noqa: E402
 from app.storage.memory import ConversationMemory  # noqa: E402
 
@@ -49,7 +50,17 @@ async def main() -> int:
         success_url=settings.billing.stripe_success_url,
         cancel_url=settings.billing.stripe_cancel_url,
     )
-    app = build_webhook_app(stripe_service, WebhookHandler(db, stripe_service))
+    wompi_service = WompiService(
+        public_key="pub_test",
+        integrity_secret="integridad",
+        events_secret="eventos",
+        amount=20000,
+    )
+    app = build_webhook_app(
+        stripe_service,
+        WebhookHandler(db, stripe_service),
+        wompi_service=wompi_service,
+    )
     runner = await start_webhook_server(app, settings.http_port)
     base = BASE_URL.format(port=settings.http_port)
     fallos = []
@@ -60,16 +71,29 @@ async def main() -> int:
             if response.status_code != 200 or response.json().get("status") != "ok":
                 fallos.append(f"/health devolvió {response.status_code}")
 
-            # Un webhook con firma falsa debe rechazarse SIEMPRE.
-            response = await client.post(
-                f"{base}/stripe/webhook",
-                content=b'{"id": "evt_falso", "type": "checkout.session.completed"}',
-                headers={"Stripe-Signature": "firma-invalida"},
-            )
-            if response.status_code != 400:
-                fallos.append(
-                    f"webhook con firma inválida devolvió {response.status_code}, se esperaba 400"
-                )
+            # Un webhook con firma falsa debe rechazarse SIEMPRE, en todas
+            # las pasarelas: estas direcciones son públicas.
+            for ruta, cuerpo, cabeceras in (
+                (
+                    "/stripe/webhook",
+                    b'{"id": "evt_falso", "type": "checkout.session.completed"}',
+                    {"Stripe-Signature": "firma-invalida"},
+                ),
+                (
+                    "/wompi/webhook",
+                    b'{"data": {"transaction": {"status": "APPROVED", '
+                    b'"reference": "premium-1-x"}}, "timestamp": 1, '
+                    b'"signature": {"properties": ["transaction.status"], '
+                    b'"checksum": "falso"}}',
+                    {},
+                ),
+            ):
+                response = await client.post(f"{base}{ruta}", content=cuerpo, headers=cabeceras)
+                if response.status_code != 400:
+                    fallos.append(
+                        f"{ruta} con firma inválida devolvió {response.status_code}, "
+                        "se esperaba 400"
+                    )
 
         # La cuota y el historial deben funcionar sobre la base real.
         billing = BillingService(db, free_daily_messages=2, billing_enabled=True)

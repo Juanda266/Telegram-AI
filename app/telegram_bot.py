@@ -3,7 +3,7 @@ import contextlib
 import datetime as dt
 import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ChatType, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
@@ -19,7 +19,8 @@ from app.assistant import Assistant
 from app.billing.service import BillingService
 from app.clock import today_iso, utcnow
 from app.config import Settings
-from app.payments.stripe_client import StripeNotConfiguredError, StripeService
+from app.payments.base import PaymentProvider, collect_checkout_options
+from app.payments.stripe_client import StripeService
 from app.payments.telegram_stars import TelegramStarsService
 from app.storage.db import Database
 
@@ -111,7 +112,9 @@ def build_application(
     stripe_service: StripeService,
     db: Database,
     stars_service: TelegramStarsService,
+    payment_providers: list[PaymentProvider] | None = None,
 ) -> Application:
+    payment_providers = payment_providers or []
     application = Application.builder().token(settings.telegram_bot_token).build()
 
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -188,9 +191,8 @@ def build_application(
         )
 
     async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not settings.billing.enabled or not (
-            stripe_service.enabled or stars_service.enabled
-        ):
+        hay_metodos = stars_service.enabled or any(p.enabled for p in payment_providers)
+        if not settings.billing.enabled or not hay_metodos:
             await update.message.reply_text(
                 "Este bot todavía no tiene pagos habilitados: puedes usarlo gratis. 🙂"
             )
@@ -207,39 +209,38 @@ def build_application(
             )
             return
 
-        # Telegram Stars es el método preferido: se paga dentro de Telegram,
-        # sin salir a un navegador ni necesitar cuenta de comercio.
+        # Telegram Stars va aparte porque no es un enlace: es una factura
+        # que se paga dentro de la propia app, sin salir al navegador.
         if stars_service.enabled:
             await context.bot.send_invoice(
                 chat_id=update.effective_chat.id,
                 **stars_service.invoice_kwargs(user_id),
             )
-            if not stripe_service.enabled:
-                return
 
-        try:
-            checkout_url = await asyncio.to_thread(
-                stripe_service.create_checkout_url, user_id
+        opciones, fallidos = await collect_checkout_options(payment_providers, user_id)
+        if fallidos:
+            logger.warning(
+                "No se pudo generar el cobro con %s para el usuario %s",
+                ", ".join(fallidos),
+                user_id,
             )
-        except StripeNotConfiguredError:
-            await update.message.reply_text(
-                "⚠️ Los pagos no están configurados correctamente todavía."
-            )
-            return
-        except Exception:
-            logger.exception("No se pudo crear la sesión de pago para %s", user_id)
-            await update.message.reply_text(
-                "⚠️ No pude generar el link de pago. Intenta de nuevo en unos minutos."
-            )
+
+        if not opciones:
+            if not stars_service.enabled:
+                await update.message.reply_text(
+                    "⚠️ No pude generar el link de pago. Intenta de nuevo en unos minutos."
+                )
             return
 
+        teclado = InlineKeyboardMarkup(
+            [[InlineKeyboardButton(opcion.label, url=opcion.url)] for opcion in opciones]
+        )
         await update.message.reply_text(
             f"💳 Plan Premium ({settings.billing.premium_price_label}): mensajes "
             "ilimitados y prioridad de respuesta.\n\n"
-            f"Paga de forma segura aquí:\n{checkout_url}\n\n"
-            "El pago se procesa con Stripe; tu suscripción se activa sola en "
-            "cuanto se confirme.",
-            disable_web_page_preview=True,
+            "Elige cómo prefieres pagar. Tu suscripción se activa sola en "
+            "cuanto se confirme el pago.",
+            reply_markup=teclado,
         )
 
     async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

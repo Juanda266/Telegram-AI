@@ -12,6 +12,7 @@ suscripción. El flujo es:
    actualiza el estado premium del usuario en la base de datos.
 """
 
+import asyncio
 import logging
 
 import stripe
@@ -26,6 +27,9 @@ class StripeNotConfiguredError(RuntimeError):
 
 
 class StripeService:
+    name = "stripe"
+    label = "💳 Tarjeta internacional (Stripe)"
+
     def __init__(
         self,
         secret_key: str,
@@ -61,6 +65,11 @@ class StripeService:
             subscription_data={"metadata": {"telegram_user_id": str(telegram_user_id)}},
         )
         return session.url
+
+    async def create_checkout(self, telegram_user_id: int) -> str:
+        # El SDK de Stripe es síncrono; se saca del event loop para no
+        # bloquear al resto de conversaciones mientras responde.
+        return await asyncio.to_thread(self.create_checkout_url, telegram_user_id)
 
     def construct_event(self, payload: bytes, signature_header: str) -> stripe.Event:
         if not self._webhook_secret:
