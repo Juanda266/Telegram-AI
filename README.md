@@ -116,9 +116,16 @@ Por defecto `BILLING_ENABLED=false` y el bot es ilimitado para todos.
 
 Hay cuatro métodos de cobro y **puedes activar los que quieras a la vez**:
 cuando el usuario manda `/suscribirme`, ve un botón por cada método
-disponible y elige el que le convenga. Basta con configurar uno; si dejas
-un proveedor a medias, el bot te avisa al arrancar en vez de fallar cuando
-alguien intente pagar.
+disponible y elige el que le convenga.
+
+**Los métodos son independientes.** Basta con configurar uno: los que dejes
+en blanco simplemente no se le ofrecen a nadie, sin más. Si solo tienes
+PayPal, rellena sus variables y listo. Eso sí, si dejas un proveedor *a
+medias* (unas variables sí y otras no), el bot te avisa al arrancar en vez
+de fallar cuando alguien intente pagar.
+
+Al arrancar, el bot escribe en el log qué métodos quedaron activos, para
+que puedas comprobarlo de un vistazo.
 
 ### Opción A: Telegram Stars (recomendada)
 
@@ -155,19 +162,25 @@ Wompi cobra pagos únicos: cada pago aprobado concede 30 días de Premium.
 
 ### Opción C: PayPal
 
-Útil para cobrarle a gente de fuera de Colombia o a quien ya tiene saldo
-en PayPal. **Ten en cuenta las comisiones**: recibir dinero en Colombia por
-PayPal sale bastante más caro que Wompi (comisión de recepción, margen al
-convertir a pesos y comisión de retiro), así que conviene ofrecerlo como
-alternativa, no como método principal.
+Cobra en cualquier país y es lo más rápido si ya tienes cuenta. **Ten en
+cuenta las comisiones**: recibir dinero en Colombia por PayPal sale bastante
+más caro que Wompi (comisión de recepción, margen al convertir a pesos y
+comisión de retiro), así que si más adelante consigues Wompi, conviene
+ponerlo como principal y dejar PayPal como alternativa.
 
-1. Crea una app en <https://developer.paypal.com> y copia
-   `PAYPAL_CLIENT_ID` y `PAYPAL_CLIENT_SECRET`.
-2. Crea un **plan de suscripción** y copia su ID (`P-...`) en
-   `PAYPAL_PLAN_ID`.
-3. Crea un webhook apuntando a `https://tu-dominio/paypal/webhook`,
+1. Necesitas una **cuenta de negocio** de PayPal (crearla es gratis) con
+   la identidad verificada.
+2. En <https://developer.paypal.com> → *Apps & Credentials*, crea una app
+   y copia `PAYPAL_CLIENT_ID` y `PAYPAL_CLIENT_SECRET`.
+3. Crea un **producto y un plan de suscripción** con el precio mensual que
+   quieras cobrar, y copia el ID del plan (`P-...`) en `PAYPAL_PLAN_ID`.
+4. En *Webhooks*, crea uno apuntando a `https://tu-dominio/paypal/webhook`
    suscrito a los eventos `BILLING.SUBSCRIPTION.*`, y copia su ID en
    `PAYPAL_WEBHOOK_ID`.
+5. Pon `BILLING_ENABLED=true` y ajusta `PREMIUM_PRICE_LABEL` al precio real.
+
+Para probarlo sin mover dinero, pon `PAYPAL_SANDBOX=true` y usa las
+credenciales y cuentas de prueba del entorno *sandbox*.
 
 ### Opción D: Stripe
 
