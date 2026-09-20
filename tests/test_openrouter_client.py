@@ -68,6 +68,30 @@ async def test_cambia_de_modelo_cuando_se_agota_la_cuota(patch_async_client):
 
 
 @pytest.mark.asyncio
+async def test_cambia_de_modelo_si_uno_devuelve_403(patch_async_client):
+    """En OpenRouter, un 403 suele significar que ESE modelo rechazó la
+    petición (moderación, política de datos), no que esté mal formada:
+    debe probarse el siguiente modelo, no reventar la respuesta entera."""
+    used_models = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        import json
+
+        model = json.loads(request.content)["model"]
+        used_models.append(model)
+        if model == "modelo-a":
+            return httpx.Response(403, text="forbidden")
+        return _ok("desde el segundo modelo")
+
+    patch_async_client(responder)
+    client = OpenRouterClient("key", ["modelo-a", "modelo-b"])
+
+    result = await client.chat([{"role": "user", "content": "hola"}])
+    assert result == "desde el segundo modelo"
+    assert used_models == ["modelo-a", "modelo-b"]
+
+
+@pytest.mark.asyncio
 async def test_error_si_todos_los_modelos_fallan(patch_async_client):
     patch_async_client(lambda request: httpx.Response(429, text="rate limited"))
     client = OpenRouterClient("key", ["a", "b", "c"])

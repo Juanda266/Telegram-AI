@@ -23,7 +23,11 @@ TIMEOUT_SECONDS = 60.0
 # Errores que indican "prueba con otro modelo": cuota agotada, modelo
 # saturado/caído, o el proveedor rechaza la petición. Un 4xx por request mal
 # formado (400) no se reintenta porque fallaría igual en cualquier modelo.
-RETRYABLE_STATUS_CODES = {402, 404, 408, 409, 429, 500, 502, 503, 504}
+# 403 se incluye porque en OpenRouter suele significar que ESE modelo o
+# proveedor en particular rechazó la petición (moderación, política de
+# datos), no que la petición esté mal formada: el siguiente modelo de la
+# lista puede aceptarla sin problema.
+RETRYABLE_STATUS_CODES = {402, 403, 404, 408, 409, 429, 500, 502, 503, 504}
 
 
 class AllModelsFailedError(RuntimeError):
