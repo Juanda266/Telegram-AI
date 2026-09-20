@@ -17,6 +17,12 @@ from duckduckgo_search import DDGS
 logger = logging.getLogger(__name__)
 
 WIKIPEDIA_API_URL = "https://es.wikipedia.org/w/api.php"
+# La política de Wikimedia exige un User-Agent descriptivo con forma de
+# contacto; sin él (o con el genérico de httpx) responde 403 Forbidden.
+# https://meta.wikimedia.org/wiki/User-Agent_policy
+WIKIPEDIA_USER_AGENT = (
+    "TelegramAIAssistant/1.0 (https://github.com/Juanda266/Telegram-AI)"
+)
 
 
 def _search_sync(query: str, max_results: int) -> list[dict[str, str]]:
@@ -46,8 +52,9 @@ async def _wikipedia_search(query: str, max_results: int) -> list[dict[str, str]
         "format": "json",
     }
     try:
+        headers = {"User-Agent": WIKIPEDIA_USER_AGENT}
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(WIKIPEDIA_API_URL, params=params)
+            response = await client.get(WIKIPEDIA_API_URL, params=params, headers=headers)
             response.raise_for_status()
             payload = response.json()
     except Exception as exc:

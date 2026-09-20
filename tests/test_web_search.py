@@ -100,3 +100,27 @@ async def test_limita_el_numero_de_resultados(monkeypatch, patch_wikipedia):
     await web_search("x", max_results=0)
 
     assert pedidos == [10, 1]
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_envia_user_agent(monkeypatch):
+    """La política de Wikimedia bloquea con 403 las peticiones sin un
+    User-Agent descriptivo: sin esto, el respaldo nunca funcionaría."""
+    monkeypatch.setattr(module, "_search_sync", lambda query, max_results: [])
+    cabeceras_recibidas = {}
+
+    def responder(request):
+        cabeceras_recibidas.update(request.headers)
+        return _wikipedia_ok(request)
+
+    original = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(responder)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", factory)
+
+    await web_search("gatos")
+
+    assert "TelegramAIAssistant" in cabeceras_recibidas.get("user-agent", "")
