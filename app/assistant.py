@@ -14,7 +14,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from app.ai.agent import ResearchAgent
+from app.ai.agent import ResearchAgent, RespuestaNoConfiableError
 from app.ai.openrouter_client import AllModelsFailedError
 from app.ai.tools.pdf_reader import PdfExtractionError, extract_text
 from app.ai.vision import VisionService
@@ -198,8 +198,8 @@ class Assistant:
                 logger.warning("La respuesta tardó más de %ss", self._timeout_seconds)
                 await self._billing.refund(user_id)
                 return AssistantReply(text=MENSAJE_TIMEOUT)
-            except AllModelsFailedError:
-                logger.exception("Ningún modelo pudo responder")
+            except (AllModelsFailedError, RespuestaNoConfiableError):
+                logger.exception("Ningún modelo dio una respuesta usable")
                 # El fallo es nuestro: no le gastamos la cuota al usuario.
                 await self._billing.refund(user_id)
                 return AssistantReply(text=mensaje_modelos_caidos)

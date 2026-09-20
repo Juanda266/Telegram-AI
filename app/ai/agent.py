@@ -20,6 +20,18 @@ from app.clock import utcnow
 
 logger = logging.getLogger(__name__)
 
+
+class RespuestaNoConfiableError(RuntimeError):
+    """El modelo nunca respetó el formato JSON tras el reintento.
+
+    Antes se le reenviaba al usuario el texto plano tal cual, pero eso
+    incluye modelos "gratis" descubiertos automáticamente que en realidad no
+    son de chat (p. ej. clasificadores de seguridad) y devuelven texto sin
+    relación con la pregunta, como "User Safety: safe". Es mejor fallar de
+    forma controlada (se le devuelve la cuota al usuario) que mostrarle algo
+    así.
+    """
+
 SYSTEM_PROMPT_TEMPLATE = """\
 Eres un asistente virtual en Telegram, útil, honesto y directo, capaz de \
 investigar en la web para dar respuestas actualizadas y verificadas (como \
@@ -182,7 +194,7 @@ class ResearchAgent:
 
             try:
                 action = _extract_json(raw_reply)
-            except ValueError:
+            except ValueError as exc:
                 # Los modelos gratuitos se salen del formato con cierta
                 # frecuencia. Antes de rendirse, se les señala el error: casi
                 # siempre lo corrigen al segundo intento.
@@ -193,8 +205,13 @@ class ResearchAgent:
                     messages.append({"role": "user", "content": RECORDATORIO_FORMATO})
                     continue
 
-                logger.warning("El modelo insiste en no usar JSON, se devuelve su texto")
-                return raw_reply.strip()
+                logger.warning(
+                    "El modelo insiste en no usar JSON, se descarta como no confiable: %r",
+                    raw_reply[:300],
+                )
+                raise RespuestaNoConfiableError(
+                    "El modelo no respondió en el formato esperado"
+                ) from exc
 
             action_type = action.get("action")
 

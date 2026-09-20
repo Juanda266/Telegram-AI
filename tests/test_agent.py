@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.ai.agent import ResearchAgent, _extract_json
+from app.ai.agent import ResearchAgent, RespuestaNoConfiableError, _extract_json
 from app.ai.openrouter_client import AllModelsFailedError
 
 
@@ -229,10 +229,14 @@ async def test_si_el_modelo_no_usa_json_se_le_pide_corregir():
 
 
 @pytest.mark.asyncio
-async def test_si_insiste_en_no_usar_json_se_devuelve_su_texto():
-    """Mejor darle al usuario algo legible que un error."""
+async def test_si_insiste_en_no_usar_json_falla_de_forma_controlada():
+    """No hay que confiar en texto de un modelo que ni siquiera respeta el
+    formato: podría no ser un modelo de chat real (p. ej. un clasificador de
+    seguridad "gratis" descubierto por error). Mejor un fallo que se le
+    devuelve la cuota al usuario que reenviarle texto sin sentido."""
     client = FakeClient(["Texto plano", "Sigo sin usar JSON"])
     agent = ResearchAgent(client=client, max_steps=4)
 
-    assert await agent.run([], "hola") == "Sigo sin usar JSON"
+    with pytest.raises(RespuestaNoConfiableError):
+        await agent.run([], "hola")
     assert len(client.calls) == 2
