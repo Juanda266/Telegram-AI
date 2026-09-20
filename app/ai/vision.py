@@ -7,6 +7,7 @@ que luego se le pasa al agente como contexto para que pueda razonar,
 buscar en la web o responder sobre lo que aparece en la foto.
 """
 
+import asyncio
 import base64
 import logging
 
@@ -19,6 +20,10 @@ from app.ai.rate_limiter import RateLimiter
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 90.0
+# Mismo motivo que CHAT_BUDGET_SECONDS en openrouter_client.py: sin un tope
+# total, un modelo de visión "descubierto" que responde con 200 pero tarda
+# muchísimo podía colgar la conversación entera.
+VISION_BUDGET_SECONDS = 60.0
 DEFAULT_PROMPT = (
     "Describe detalladamente esta imagen. Si contiene texto, transcríbelo "
     "literalmente. Si es un gráfico, tabla o documento, explica los datos "
@@ -59,37 +64,50 @@ class VisionService:
         ]
 
         last_error: Exception | None = None
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            for model in models:
-                if self._rate_limiter is not None:
-                    await self._rate_limiter.acquire()
+        try:
+            async with asyncio.timeout(VISION_BUDGET_SECONDS):
+                async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                    for model in models:
+                        if self._rate_limiter is not None:
+                            await self._rate_limiter.acquire()
 
-                try:
-                    response = await client.post(
-                        API_URL,
-                        headers=self._headers,
-                        json={"model": model, "messages": payload_messages},
-                    )
-                except httpx.HTTPError as exc:
-                    logger.warning("Modelo de visión %s no disponible: %s", model, exc)
-                    last_error = exc
-                    continue
+                        try:
+                            response = await client.post(
+                                API_URL,
+                                headers=self._headers,
+                                json={"model": model, "messages": payload_messages},
+                            )
+                        except httpx.HTTPError as exc:
+                            logger.warning("Modelo de visión %s no disponible: %s", model, exc)
+                            last_error = exc
+                            continue
 
-                if response.status_code != 200:
-                    logger.warning(
-                        "Modelo de visión %s falló (HTTP %s)", model, response.status_code
-                    )
-                    last_error = RuntimeError(f"HTTP {response.status_code} de {model}")
-                    continue
+                        if response.status_code != 200:
+                            logger.warning(
+                                "Modelo de visión %s falló (HTTP %s)",
+                                model,
+                                response.status_code,
+                            )
+                            last_error = RuntimeError(f"HTTP {response.status_code} de {model}")
+                            continue
 
-                content = (
-                    response.json().get("choices", [{}])[0].get("message", {}).get("content")
-                )
-                if content:
-                    logger.info("Imagen descrita con el modelo %s", model)
-                    return content
+                        content = (
+                            response.json()
+                            .get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content")
+                        )
+                        if content:
+                            logger.info("Imagen descrita con el modelo %s", model)
+                            return content
 
-                last_error = RuntimeError(f"Respuesta vacía de {model}")
+                        last_error = RuntimeError(f"Respuesta vacía de {model}")
+        except TimeoutError as exc:
+            logger.warning(
+                "Se agotó el presupuesto de %ss probando modelos de visión",
+                VISION_BUDGET_SECONDS,
+            )
+            last_error = exc
 
         raise AllModelsFailedError("Ningún modelo con visión pudo leer la imagen") from last_error
 

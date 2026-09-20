@@ -8,6 +8,7 @@ timeout, etc.), prueba automáticamente con el siguiente. Así el bot sigue
 funcionando aunque se agote el cupo gratuito de un modelo en particular.
 """
 
+import asyncio
 import logging
 
 import httpx
@@ -19,6 +20,16 @@ logger = logging.getLogger(__name__)
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 TIMEOUT_SECONDS = 60.0
+
+# Tope de tiempo para TODO el intento de chat(), sin importar cuántos
+# candidatos haya que probar. Algunos modelos gratuitos "descubiertos" por
+# API responden con HTTP 200 pero tardan muchísimo (o no fallan con un
+# error de red claro, simplemente no sueltan la respuesta): sin este
+# presupuesto, probar candidato tras candidato podía consumir por sí solo
+# todo el tiempo límite de la conversación entera (180s en app/assistant.py)
+# y el usuario se quedaba viendo "escribiendo..." varios minutos sin ni
+# siquiera un mensaje de error.
+CHAT_BUDGET_SECONDS = 45.0
 
 # Errores que indican "prueba con otro modelo": cuota agotada, modelo
 # saturado/caído, o el proveedor rechaza la petición. Un 4xx por request mal
@@ -109,55 +120,69 @@ class OpenRouterClient:
         válida. `exclude_models` permite saltarse modelos que quien llama ya
         sabe que no sirvieron (por ejemplo, en un reintento tras una
         respuesta inválida), para no volver a toparse con ellos.
+
+        Todo el recorrido está limitado a `CHAT_BUDGET_SECONDS` en total: sin
+        este tope, un modelo que responde con HTTP 200 pero tarda muchísimo
+        (o que simplemente no suelta la respuesta) podía consumir por sí
+        solo el tiempo límite de la conversación entera.
         """
         last_error: Exception | None = None
         models = [m for m in await self._candidate_models() if m not in exclude_models]
 
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            for model in models:
-                payload = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                }
-                if self._rate_limiter is not None:
-                    await self._rate_limiter.acquire()
+        try:
+            async with asyncio.timeout(CHAT_BUDGET_SECONDS):
+                async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                    for model in models:
+                        payload = {
+                            "model": model,
+                            "messages": messages,
+                            "temperature": temperature,
+                        }
+                        if self._rate_limiter is not None:
+                            await self._rate_limiter.acquire()
 
-                try:
-                    response = await client.post(
-                        API_URL, headers=self._headers, json=payload
-                    )
-                except httpx.HTTPError as exc:
-                    logger.warning("Modelo %s no disponible (red): %s", model, exc)
-                    last_error = exc
-                    continue
+                        try:
+                            response = await client.post(
+                                API_URL, headers=self._headers, json=payload
+                            )
+                        except httpx.HTTPError as exc:
+                            logger.warning("Modelo %s no disponible (red): %s", model, exc)
+                            last_error = exc
+                            continue
 
-                if response.status_code == 200:
-                    data = response.json()
-                    choice = data.get("choices", [{}])[0]
-                    content = choice.get("message", {}).get("content")
-                    if content:
-                        logger.debug("Respuesta obtenida del modelo %s", model)
-                        return ChatReply(content, model)
-                    logger.warning("Modelo %s devolvió una respuesta vacía", model)
-                    last_error = RuntimeError(f"Respuesta vacía de {model}")
-                    continue
+                        if response.status_code == 200:
+                            data = response.json()
+                            choice = data.get("choices", [{}])[0]
+                            content = choice.get("message", {}).get("content")
+                            if content:
+                                logger.debug("Respuesta obtenida del modelo %s", model)
+                                return ChatReply(content, model)
+                            logger.warning("Modelo %s devolvió una respuesta vacía", model)
+                            last_error = RuntimeError(f"Respuesta vacía de {model}")
+                            continue
 
-                if response.status_code in RETRYABLE_STATUS_CODES:
-                    logger.warning(
-                        "Modelo %s falló (HTTP %s), probando el siguiente: %s",
-                        model,
-                        response.status_code,
-                        response.text[:300],
-                    )
-                    last_error = RuntimeError(
-                        f"HTTP {response.status_code} de {model}: {response.text[:300]}"
-                    )
-                    continue
+                        if response.status_code in RETRYABLE_STATUS_CODES:
+                            logger.warning(
+                                "Modelo %s falló (HTTP %s), probando el siguiente: %s",
+                                model,
+                                response.status_code,
+                                response.text[:300],
+                            )
+                            last_error = RuntimeError(
+                                f"HTTP {response.status_code} de {model}: {response.text[:300]}"
+                            )
+                            continue
 
-                # Error no recuperable (ej. 400 por payload inválido): no
-                # tiene sentido reintentar con otro modelo.
-                response.raise_for_status()
+                        # Error no recuperable (ej. 400 por payload inválido): no
+                        # tiene sentido reintentar con otro modelo.
+                        response.raise_for_status()
+        except TimeoutError as exc:
+            logger.warning(
+                "Se agotó el presupuesto de %ss probando modelos, se corta en vez "
+                "de seguir esperando",
+                CHAT_BUDGET_SECONDS,
+            )
+            last_error = exc
 
         raise AllModelsFailedError(
             "Ningún modelo de OpenRouter respondió correctamente"

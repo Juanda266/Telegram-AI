@@ -1,6 +1,9 @@
+import asyncio
+
 import httpx
 import pytest
 
+from app.ai import openrouter_client as module
 from app.ai.openrouter_client import AllModelsFailedError, OpenRouterClient
 
 
@@ -175,3 +178,38 @@ async def test_cabeceras_opcionales_se_incluyen():
 
     minimal = OpenRouterClient("key", ["a"])
     assert "HTTP-Referer" not in minimal._headers
+
+
+@pytest.mark.asyncio
+async def test_presupuesto_total_corta_un_modelo_que_no_suelta_respuesta(monkeypatch):
+    """Un modelo puede responder HTTP 200 pero tardar muchísimo (o no
+    responder nunca) sin que eso cuente como un error de red claro. Sin un
+    tope total, eso colgaría la conversación entera."""
+    monkeypatch.setattr(module, "CHAT_BUDGET_SECONDS", 0.05)
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "tarde"}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, *args, **kwargs):
+            await asyncio.sleep(10)
+            return FakeResponse()
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", FakeAsyncClient)
+    client = OpenRouterClient("key", ["modelo-lento"])
+
+    with pytest.raises(AllModelsFailedError):
+        await client.chat([{"role": "user", "content": "hola"}])

@@ -1,9 +1,11 @@
+import asyncio
 import base64
 import json
 
 import httpx
 import pytest
 
+from app.ai import vision as module
 from app.ai.openrouter_client import AllModelsFailedError
 from app.ai.vision import VisionService, _to_data_url
 
@@ -123,3 +125,36 @@ async def test_respeta_el_limitador_de_peticiones(patch_vision_client):
     await service.describe(b"imagen")
 
     assert len(llamadas) == 1
+
+
+@pytest.mark.asyncio
+async def test_presupuesto_total_corta_un_modelo_que_no_suelta_respuesta(monkeypatch):
+    """Mismo riesgo que en openrouter_client.py: un modelo de visión puede
+    responder HTTP 200 pero tardar muchísimo sin colgar la conversación."""
+    monkeypatch.setattr(module, "VISION_BUDGET_SECONDS", 0.05)
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "tarde"}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, *args, **kwargs):
+            await asyncio.sleep(10)
+            return FakeResponse()
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", FakeAsyncClient)
+    service = _service(FakeCatalog(["modelo-lento"]))
+
+    with pytest.raises(AllModelsFailedError):
+        await service.describe(b"imagen")

@@ -83,6 +83,13 @@ de cada commit.
   con `BuilderError`. Si se actualiza una, revisar la otra.
 - **Las peticiones a la API de Wikipedia llevan un `User-Agent`
   descriptivo**: su política de uso responde 403 a quien no lo mande.
+- **`chat()` y `VisionService.describe()` tienen un tope total de tiempo**
+  (`CHAT_BUDGET_SECONDS` / `VISION_BUDGET_SECONDS`), no solo por petición:
+  un modelo "descubierto" puede responder HTTP 200 pero tardar muchísimo
+  (o no soltar nunca la respuesta) sin que eso cuente como un error de red.
+  Sin ese tope total, probar candidato tras candidato podía consumir por sí
+  solo los 180s de tiempo límite de la conversación entera y el usuario se
+  quedaba viendo "escribiendo..." varios minutos sin ni un mensaje de error.
 
 ## Estilo
 
