@@ -19,7 +19,12 @@ from app.ai.rate_limiter import RateLimiter
 logger = logging.getLogger(__name__)
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-TIMEOUT_SECONDS = 60.0
+# Tope por PETICIÓN individual. Tiene que ser bastante menor que
+# CHAT_BUDGET_SECONDS: si un modelo se cuelga y este tope fuera mayor (o
+# solo un poco menor), ese único modelo agotaba todo el presupuesto total
+# antes de que su propio timeout por petición llegara a saltar, y el resto
+# de candidatos de la lista ni siquiera se llegaban a intentar.
+TIMEOUT_SECONDS = 15.0
 
 # Tope de tiempo para TODO el intento de chat(), sin importar cuántos
 # candidatos haya que probar. Algunos modelos gratuitos "descubiertos" por

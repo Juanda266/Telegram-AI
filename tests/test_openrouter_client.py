@@ -213,3 +213,11 @@ async def test_presupuesto_total_corta_un_modelo_que_no_suelta_respuesta(monkeyp
 
     with pytest.raises(AllModelsFailedError):
         await client.chat([{"role": "user", "content": "hola"}])
+
+
+def test_timeout_por_peticion_es_menor_que_el_presupuesto_total():
+    """Bug real: con TIMEOUT_SECONDS=60 y CHAT_BUDGET_SECONDS=45, un solo
+    modelo colgado agotaba todo el presupuesto total sin que su propio
+    timeout por petición llegara a saltar nunca, y el resto de la lista de
+    candidatos ni siquiera se llegaba a intentar."""
+    assert module.TIMEOUT_SECONDS < module.CHAT_BUDGET_SECONDS

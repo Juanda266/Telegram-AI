@@ -102,6 +102,14 @@ de cada commit.
   formato (créditos agotados, modelos restringidos a "agentic harnesses")
   antes de llegar a uno que responda bien. Con un solo reintento, una racha
   así hacía que el agente se rindiera con candidatos sin probar todavía.
+- **El timeout por petición (`TIMEOUT_SECONDS`) tiene que ser bastante
+  menor que el presupuesto total** (`CHAT_BUDGET_SECONDS` /
+  `VISION_BUDGET_SECONDS`), nunca al revés. Bug real: con
+  `TIMEOUT_SECONDS=60` y `CHAT_BUDGET_SECONDS=45`, un solo modelo colgado
+  agotaba todo el presupuesto total sin que su propio timeout por petición
+  llegara siquiera a saltar, y el resto de la lista de candidatos (7 de 12
+  ese día) ni se llegaba a intentar. Hay un test que verifica esta relación
+  directamente en ambos módulos.
 
 ## Estilo
 

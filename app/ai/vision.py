@@ -19,7 +19,11 @@ from app.ai.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_SECONDS = 90.0
+# Tope por PETICIÓN individual, bastante menor que VISION_BUDGET_SECONDS:
+# igual que en openrouter_client.py, si un modelo se cuelga necesita fallar
+# rápido para dejarle tiempo al resto de candidatos dentro del presupuesto
+# total, en vez de agotarlo él solo.
+TIMEOUT_SECONDS = 20.0
 # Mismo motivo que CHAT_BUDGET_SECONDS en openrouter_client.py: sin un tope
 # total, un modelo de visión "descubierto" que responde con 200 pero tarda
 # muchísimo podía colgar la conversación entera.

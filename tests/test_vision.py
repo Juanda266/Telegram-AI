@@ -158,3 +158,10 @@ async def test_presupuesto_total_corta_un_modelo_que_no_suelta_respuesta(monkeyp
 
     with pytest.raises(AllModelsFailedError):
         await service.describe(b"imagen")
+
+
+def test_timeout_por_peticion_es_menor_que_el_presupuesto_total():
+    """Mismo bug real que en openrouter_client.py: si el timeout por
+    petición no es bastante menor que el presupuesto total, un solo modelo
+    colgado agota el presupuesto entero sin dejar intentar al resto."""
+    assert module.TIMEOUT_SECONDS < module.VISION_BUDGET_SECONDS
