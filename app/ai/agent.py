@@ -121,7 +121,12 @@ def _extract_json(raw_text: str) -> dict:
     raise ValueError(f"No se pudo interpretar la respuesta del modelo: {text[:300]!r}")
 
 
-MAX_REINTENTOS_FORMATO = 1
+MAX_REINTENTOS_FORMATO = 3
+# En una mala tanda, varios candidatos seguidos pueden fallar por razones
+# ajenas al formato (créditos agotados, modelos restringidos a "agentic
+# harnesses", etc.) antes de llegar a uno que sí responda bien: con solo
+# 1 reintento, cualquier racha de dos modelos problemáticos seguidos hacía
+# que el agente se rindiera aunque quedaran candidatos sin probar.
 
 RECORDATORIO_FORMATO = (
     "Tu respuesta anterior no era un objeto JSON válido. Vuelve a "

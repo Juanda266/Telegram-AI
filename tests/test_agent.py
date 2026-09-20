@@ -3,6 +3,7 @@ import json
 import pytest
 
 from app.ai.agent import (
+    MAX_REINTENTOS_FORMATO,
     ResearchAgent,
     RespuestaNoConfiableError,
     _es_mensaje_simple,
@@ -280,12 +281,12 @@ async def test_si_insiste_en_no_usar_json_falla_de_forma_controlada():
     formato: podría no ser un modelo de chat real (p. ej. un clasificador de
     seguridad "gratis" descubierto por error). Mejor un fallo que se le
     devuelve la cuota al usuario que reenviarle texto sin sentido."""
-    client = FakeClient(["Texto plano", "Sigo sin usar JSON"])
-    agent = ResearchAgent(client=client, max_steps=4)
+    client = FakeClient(["Texto plano"] * (MAX_REINTENTOS_FORMATO + 1))
+    agent = ResearchAgent(client=client, max_steps=MAX_REINTENTOS_FORMATO + 2)
 
     with pytest.raises(RespuestaNoConfiableError):
         await agent.run([], "hola")
-    assert len(client.calls) == 2
+    assert len(client.calls) == MAX_REINTENTOS_FORMATO + 1
 
 
 @pytest.mark.parametrize(

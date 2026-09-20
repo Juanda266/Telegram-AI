@@ -97,6 +97,11 @@ de cada commit.
   `FreeModelCatalog.get_free_models`, normalmente más rápidos); el resto
   sigue usando los de mayor contexto primero. Si la heurística se
   equivoca, la cadena de respaldo entre modelos sigue funcionando igual.
+- **`MAX_REINTENTOS_FORMATO` (app/ai/agent.py) vale 3, no 1**: en una mala
+  tanda, varios candidatos seguidos pueden fallar por razones ajenas al
+  formato (créditos agotados, modelos restringidos a "agentic harnesses")
+  antes de llegar a uno que responda bien. Con un solo reintento, una racha
+  así hacía que el agente se rindiera con candidatos sin probar todavía.
 
 ## Estilo
 
