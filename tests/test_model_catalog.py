@@ -63,6 +63,30 @@ async def test_ordena_por_contexto_descendente(patch_catalog_client):
 
 
 @pytest.mark.asyncio
+async def test_prefer_light_prioriza_el_menor_contexto(patch_catalog_client):
+    """Para charla simple no hace falta el modelo más grande disponible:
+    prefer_light debe probar primero los de menor contexto."""
+    patch_catalog_client(
+        _responder(
+            [
+                _model("chico", context=4000),
+                _model("grande", context=200000),
+                _model("mediano", context=32000),
+            ]
+        )
+    )
+    catalog = FreeModelCatalog()
+
+    assert await catalog.get_free_models(prefer_light=True) == [
+        "chico",
+        "mediano",
+        "grande",
+    ]
+    # Sin pedirlo explícitamente, se mantiene el orden normal (más capaz primero).
+    assert await catalog.get_free_models() == ["grande", "mediano", "chico"]
+
+
+@pytest.mark.asyncio
 async def test_excluye_modelos_no_conversacionales(patch_catalog_client):
     patch_catalog_client(
         _responder([_model("proveedor/text-embed-3"), _model("proveedor/chat")])
@@ -110,7 +134,7 @@ async def test_usa_cache_y_no_repite_la_consulta(patch_catalog_client):
 @pytest.mark.asyncio
 async def test_cliente_añade_modelos_descubiertos_como_respaldo():
     class FakeCatalog:
-        async def get_free_models(self):
+        async def get_free_models(self, prefer_light=False):
             return ["configurado", "descubierto-1", "descubierto-2"]
 
     client = OpenRouterClient("key", ["configurado"], catalog=FakeCatalog())
@@ -126,7 +150,7 @@ async def test_cliente_añade_modelos_descubiertos_como_respaldo():
 @pytest.mark.asyncio
 async def test_catalogo_roto_no_rompe_el_cliente():
     class BrokenCatalog:
-        async def get_free_models(self):
+        async def get_free_models(self, prefer_light=False):
             raise RuntimeError("boom")
 
     client = OpenRouterClient("key", ["configurado"], catalog=BrokenCatalog())
@@ -155,3 +179,21 @@ async def test_sin_modelos_de_vision_devuelve_lista_vacia(patch_catalog_client):
     patch_catalog_client(_responder([_model("solo-texto", modalities=["text"])]))
 
     assert await FreeModelCatalog().get_free_vision_models() == []
+
+
+@pytest.mark.asyncio
+async def test_cliente_pasa_prefer_light_al_catalogo():
+    class FakeCatalog:
+        def __init__(self):
+            self.pedidos: list[bool] = []
+
+        async def get_free_models(self, prefer_light=False):
+            self.pedidos.append(prefer_light)
+            return ["descubierto"]
+
+    catalog = FakeCatalog()
+    client = OpenRouterClient("key", ["configurado"], catalog=catalog)
+
+    await client._candidate_models(prefer_light=True)
+
+    assert catalog.pedidos == [True]

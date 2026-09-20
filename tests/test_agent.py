@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from app.ai.agent import ResearchAgent, RespuestaNoConfiableError, _extract_json
+from app.ai.agent import (
+    ResearchAgent,
+    RespuestaNoConfiableError,
+    _es_mensaje_simple,
+    _extract_json,
+)
 from app.ai.openrouter_client import AllModelsFailedError
 
 
@@ -13,10 +18,14 @@ class FakeClient:
         self._replies = list(replies)
         self.calls: list[list[dict]] = []
         self.exclude_calls: list[frozenset[str]] = []
+        self.prefer_light_calls: list[bool] = []
 
-    async def chat(self, messages, temperature: float = 0.4, exclude_models=frozenset()) -> str:
+    async def chat(
+        self, messages, temperature: float = 0.4, exclude_models=frozenset(), prefer_light=False
+    ) -> str:
         self.calls.append(list(messages))
         self.exclude_calls.append(exclude_models)
+        self.prefer_light_calls.append(prefer_light)
         return self._replies.pop(0)
 
 
@@ -140,7 +149,9 @@ async def test_fallo_de_todos_los_modelos_se_propaga():
     para no gastarle la cuota al usuario."""
 
     class FailingClient:
-        async def chat(self, messages, temperature: float = 0.4, exclude_models=frozenset()):
+        async def chat(
+            self, messages, temperature: float = 0.4, exclude_models=frozenset(), prefer_light=False
+        ):
             raise AllModelsFailedError("sin modelos")
 
     agent = ResearchAgent(client=FailingClient(), max_steps=3)
@@ -242,7 +253,9 @@ async def test_reintento_de_formato_excluye_al_modelo_que_fallo():
             self._replies = list(replies)
             self.exclude_calls: list[frozenset[str]] = []
 
-        async def chat(self, messages, temperature=0.4, exclude_models=frozenset()):
+        async def chat(
+            self, messages, temperature=0.4, exclude_models=frozenset(), prefer_light=False
+        ):
             self.exclude_calls.append(exclude_models)
             return self._replies.pop(0)
 
@@ -273,3 +286,37 @@ async def test_si_insiste_en_no_usar_json_falla_de_forma_controlada():
     with pytest.raises(RespuestaNoConfiableError):
         await agent.run([], "hola")
     assert len(client.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "texto,esperado",
+    [
+        ("hola", True),
+        ("gracias!", True),
+        ("busca el precio del dólar hoy", False),  # palabra de complejidad
+        ("cuánto es 2 + 2", False),  # tiene dígitos
+        ("a" * 61, False),  # supera el umbral de longitud
+    ],
+)
+def test_es_mensaje_simple(texto, esperado):
+    assert _es_mensaje_simple(texto) is esperado
+
+
+@pytest.mark.asyncio
+async def test_mensaje_simple_pide_modelos_ligeros():
+    client = FakeClient(['{"action": "final", "content": "¡Hola!"}'])
+    agent = ResearchAgent(client=client, max_steps=3)
+
+    await agent.run([], "hola")
+
+    assert client.prefer_light_calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_mensaje_complejo_no_pide_modelos_ligeros():
+    client = FakeClient(['{"action": "final", "content": "ok"}'])
+    agent = ResearchAgent(client=client, max_steps=3)
+
+    await agent.run([], "busca el precio actual del dólar y compáralo con el de ayer")
+
+    assert client.prefer_light_calls == [False]

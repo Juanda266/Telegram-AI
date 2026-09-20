@@ -174,6 +174,47 @@ def _normalize_history(history: list[dict]) -> list[dict]:
     return normalized
 
 
+# Señales baratas de que la pregunta probablemente necesite un modelo más
+# capaz (razonar bien, seguir varios pasos de búsqueda): números o fechas
+# concretas, o palabras típicas de preguntas que requieren datos actuales o
+# comparaciones. Nada de esto llama a otro modelo para decidir: es una
+# heurística de texto, no una clasificación real, así que puede fallar en
+# cualquier dirección sin romper nada — la cadena de respaldo entre modelos
+# sigue funcionando igual si el elegido no sirve.
+UMBRAL_LONGITUD_MENSAJE_SIMPLE = 60
+_PALABRAS_DE_MENSAJE_COMPLEJO = (
+    "busca",
+    "investiga",
+    "compara",
+    "precio",
+    "cuánto",
+    "cuanto",
+    "recomiend",
+    "actual",
+    "hoy",
+    "noticia",
+    "último",
+    "ultima",
+    "reciente",
+    "explica",
+    "resume",
+    "diferencia",
+)
+
+
+def _es_mensaje_simple(texto: str) -> bool:
+    """Charla corta y sin pinta de necesitar búsqueda o cálculo: no hace
+    falta gastar el modelo más grande y lento disponible en un "hola"."""
+    texto_normalizado = texto.strip().lower()
+    if not texto_normalizado or len(texto_normalizado) > UMBRAL_LONGITUD_MENSAJE_SIMPLE:
+        return False
+    if any(caracter.isdigit() for caracter in texto_normalizado):
+        return False
+    return not any(
+        palabra in texto_normalizado for palabra in _PALABRAS_DE_MENSAJE_COMPLEJO
+    )
+
+
 class ResearchAgent:
     def __init__(self, client: OpenRouterClient, max_steps: int = 6) -> None:
         self._client = client
@@ -189,13 +230,19 @@ class ResearchAgent:
         # segunda oportunidad a él mismo: probablemente ni siquiera sea un
         # modelo de chat real. Se excluye para que el reintento use otro.
         modelos_excluidos: set[str] = set()
+        # Se decide una sola vez por turno, con el mensaje que escribió el
+        # usuario: los pasos siguientes del ciclo ReAct siguen respondiendo
+        # a la misma pregunta, así que no tiene sentido reevaluarlo cada vez.
+        preferir_ligero = _es_mensaje_simple(user_message)
 
         for step in range(self._max_steps):
             # Si ningún modelo responde se propaga AllModelsFailedError: quien
             # llama necesita distinguir un fallo nuestro de una respuesta real
             # (por ejemplo, para no gastarle la cuota al usuario).
             raw_reply = await self._client.chat(
-                messages, exclude_models=frozenset(modelos_excluidos)
+                messages,
+                exclude_models=frozenset(modelos_excluidos),
+                prefer_light=preferir_ligero,
             )
 
             try:

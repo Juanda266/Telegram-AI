@@ -90,6 +90,13 @@ de cada commit.
   Sin ese tope total, probar candidato tras candidato podía consumir por sí
   solo los 180s de tiempo límite de la conversación entera y el usuario se
   quedaba viendo "escribiendo..." varios minutos sin ni un mensaje de error.
+- **El modelo a probar se elige según el mensaje, con una heurística de
+  texto barata** (`_es_mensaje_simple` en `app/ai/agent.py`), no llamando a
+  otro modelo para decidir: charla corta y sin pinta de necesitar búsqueda
+  usa `prefer_light=True` (modelos de menor contexto en
+  `FreeModelCatalog.get_free_models`, normalmente más rápidos); el resto
+  sigue usando los de mayor contexto primero. Si la heurística se
+  equivoca, la cadena de respaldo entre modelos sigue funcionando igual.
 
 ## Estilo
 

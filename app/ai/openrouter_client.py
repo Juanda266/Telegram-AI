@@ -91,7 +91,7 @@ class OpenRouterClient:
         llamen a la misma API (por ejemplo, el de visión)."""
         return dict(self._headers)
 
-    async def _candidate_models(self) -> list[str]:
+    async def _candidate_models(self, prefer_light: bool = False) -> list[str]:
         """Modelos configurados primero y, detrás, los gratuitos descubiertos
         automáticamente (sin repetir), como red de seguridad extra."""
         candidates = list(self._models)
@@ -99,7 +99,7 @@ class OpenRouterClient:
             return candidates
 
         try:
-            discovered = await self._catalog.get_free_models()
+            discovered = await self._catalog.get_free_models(prefer_light=prefer_light)
         except Exception:
             logger.exception("Fallo al obtener el catálogo de modelos gratuitos")
             return candidates
@@ -113,13 +113,17 @@ class OpenRouterClient:
         messages: list[dict],
         temperature: float = 0.4,
         exclude_models: frozenset[str] = frozenset(),
+        prefer_light: bool = False,
     ) -> str:
         """Envía la conversación al primer modelo disponible y devuelve el texto.
 
         Recorre los modelos candidatos en orden hasta obtener una respuesta
         válida. `exclude_models` permite saltarse modelos que quien llama ya
         sabe que no sirvieron (por ejemplo, en un reintento tras una
-        respuesta inválida), para no volver a toparse con ellos.
+        respuesta inválida), para no volver a toparse con ellos. `prefer_light`
+        prioriza los modelos descubiertos de menor contexto (normalmente más
+        rápidos), pensado para mensajes simples que no necesitan el modelo
+        más grande disponible.
 
         Todo el recorrido está limitado a `CHAT_BUDGET_SECONDS` en total: sin
         este tope, un modelo que responde con HTTP 200 pero tarda muchísimo
@@ -127,7 +131,11 @@ class OpenRouterClient:
         solo el tiempo límite de la conversación entera.
         """
         last_error: Exception | None = None
-        models = [m for m in await self._candidate_models() if m not in exclude_models]
+        models = [
+            m
+            for m in await self._candidate_models(prefer_light)
+            if m not in exclude_models
+        ]
 
         try:
             async with asyncio.timeout(CHAT_BUDGET_SECONDS):

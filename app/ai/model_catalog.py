@@ -55,13 +55,26 @@ class FreeModelCatalog:
     def __init__(self, api_key: str = "", ttl_seconds: int = CACHE_TTL_SECONDS) -> None:
         self._api_key = api_key
         self._ttl_seconds = ttl_seconds
-        self._cached: list[str] = []
+        # Todos los modelos usables descubiertos, ordenados de mayor a menor
+        # contexto (no solo los primeros N): así se puede servir tanto la
+        # cola de los "grandes" como la de los "ligeros" sin dos consultas.
+        self._cached_all: list[str] = []
         self._cached_vision: list[str] = []
         self._fetched_at: float = 0.0
 
-    async def get_free_models(self) -> list[str]:
+    async def get_free_models(self, prefer_light: bool = False) -> list[str]:
+        """Modelos gratuitos de texto, en el orden en que conviene probarlos.
+
+        `prefer_light` prioriza los de menor contexto (normalmente más
+        pequeños y rápidos): tiene sentido para mensajes cortos o charla
+        casual, donde no hace falta el modelo más grande disponible. Es solo
+        el orden de intento; si el elegido no sirve, el resto de la cadena
+        de respaldo sigue funcionando igual.
+        """
         await self._refrescar_si_hace_falta()
-        return self._cached
+        if prefer_light:
+            return list(reversed(self._cached_all[-MAX_DISCOVERED_MODELS:]))
+        return self._cached_all[:MAX_DISCOVERED_MODELS]
 
     async def get_free_vision_models(self) -> list[str]:
         """Modelos gratuitos que además aceptan imágenes como entrada."""
@@ -69,12 +82,12 @@ class FreeModelCatalog:
         return self._cached_vision
 
     async def _refrescar_si_hace_falta(self) -> None:
-        if self._cached and (time.monotonic() - self._fetched_at) < self._ttl_seconds:
+        if self._cached_all and (time.monotonic() - self._fetched_at) < self._ttl_seconds:
             return
 
         models, vision_models = await self._fetch()
         if models:
-            self._cached = models
+            self._cached_all = models
             self._cached_vision = vision_models
             self._fetched_at = time.monotonic()
 
@@ -96,17 +109,19 @@ class FreeModelCatalog:
             for model in payload.get("data", [])
             if _is_free(model) and _is_usable(model)
         ]
-        # Más contexto = puede manejar conversaciones e investigaciones más largas.
+        # Más contexto = puede manejar conversaciones e investigaciones más
+        # largas (y suele ser un modelo más grande y lento); se guardan
+        # todos para poder servir también la punta de los más pequeños.
         candidates.sort(key=lambda m: m.get("context_length") or 0, reverse=True)
 
-        discovered = [model["id"] for model in candidates[:MAX_DISCOVERED_MODELS]]
+        discovered = [model["id"] for model in candidates]
         vision = [
             model["id"] for model in candidates if _supports_images(model)
         ][:MAX_DISCOVERED_MODELS]
 
         logger.info(
             "Modelos gratuitos descubiertos en OpenRouter: %s (con visión: %s)",
-            ", ".join(discovered) or "(ninguno)",
+            ", ".join(discovered[:MAX_DISCOVERED_MODELS]) or "(ninguno)",
             ", ".join(vision) or "(ninguno)",
         )
         return discovered, vision
