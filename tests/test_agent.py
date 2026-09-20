@@ -12,9 +12,11 @@ class FakeClient:
     def __init__(self, replies: list[str]) -> None:
         self._replies = list(replies)
         self.calls: list[list[dict]] = []
+        self.exclude_calls: list[frozenset[str]] = []
 
-    async def chat(self, messages, temperature: float = 0.4) -> str:
+    async def chat(self, messages, temperature: float = 0.4, exclude_models=frozenset()) -> str:
         self.calls.append(list(messages))
+        self.exclude_calls.append(exclude_models)
         return self._replies.pop(0)
 
 
@@ -138,7 +140,7 @@ async def test_fallo_de_todos_los_modelos_se_propaga():
     para no gastarle la cuota al usuario."""
 
     class FailingClient:
-        async def chat(self, messages, temperature: float = 0.4):
+        async def chat(self, messages, temperature: float = 0.4, exclude_models=frozenset()):
             raise AllModelsFailedError("sin modelos")
 
     agent = ResearchAgent(client=FailingClient(), max_steps=3)
@@ -226,6 +228,37 @@ async def test_si_el_modelo_no_usa_json_se_le_pide_corregir():
 
     assert await agent.run([], "hola") == "La respuesta correcta"
     assert "JSON válido" in client.calls[1][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_reintento_de_formato_excluye_al_modelo_que_fallo():
+    """Si el modelo que respondió no respeta el formato, reintentar con el
+    mismo modelo es inútil (y en el peor caso, ni siquiera es un modelo de
+    chat real). El segundo intento debe excluirlo explícitamente."""
+    from app.ai.openrouter_client import ChatReply
+
+    class ClientConModelo:
+        def __init__(self, replies):
+            self._replies = list(replies)
+            self.exclude_calls: list[frozenset[str]] = []
+
+        async def chat(self, messages, temperature=0.4, exclude_models=frozenset()):
+            self.exclude_calls.append(exclude_models)
+            return self._replies.pop(0)
+
+    client = ClientConModelo(
+        [
+            ChatReply("User Safety: safe", "un-modelo-raro:free"),
+            ChatReply(
+                '{"action": "final", "content": "ok"}', "otro-modelo:free"
+            ),
+        ]
+    )
+    agent = ResearchAgent(client=client, max_steps=4)
+
+    assert await agent.run([], "hola") == "ok"
+    assert client.exclude_calls[0] == frozenset()
+    assert client.exclude_calls[1] == frozenset({"un-modelo-raro:free"})
 
 
 @pytest.mark.asyncio

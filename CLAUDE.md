@@ -61,6 +61,28 @@ de cada commit.
 - **Las columnas nuevas de SQLite se añaden en `_COLUMNAS_NUEVAS`**:
   `CREATE TABLE IF NOT EXISTS` no toca las bases ya creadas, así que sin
   esa migración quien ya tuviera el bot corriendo perdería datos.
+- **En OpenRouter, un 403 es "prueba con otro modelo"**, no un error fatal:
+  suele significar que ESE modelo o proveedor rechazó la petición
+  (moderación, política de datos), no que la petición esté mal formada.
+  Está en `RETRYABLE_STATUS_CODES`.
+- **Nunca se le reenvía al usuario texto crudo de un modelo que ignoró el
+  formato JSON** tras el reintento: el catálogo de modelos "gratis" se
+  descubre automáticamente y a veces incluye modelos que no son de chat de
+  verdad (p. ej. clasificadores de seguridad), que responden con texto sin
+  relación a la pregunta. Ese caso lanza `RespuestaNoConfiableError`
+  (`app/ai/agent.py`) y se trata igual que si ningún modelo respondiera:
+  se devuelve la cuota y se muestra el mensaje genérico de error.
+- **El modelo que falló el formato se excluye en el reintento**
+  (`OpenRouterClient.chat(..., exclude_models=...)`): como el cliente
+  siempre prueba los modelos en el mismo orden y se detiene en el primero
+  que responde con HTTP 200, sin esto el "reintento" volvía a caer en el
+  mismo modelo defectuoso en vez de probar otro.
+- **`duckduckgo-search` debe mantenerse alineado con `primp`**: versiones
+  viejas de esa librería usan cadenas de "impersonate" de navegador (p. ej.
+  `chrome_119`) que versiones nuevas de `primp` ya no reconocen y fallan
+  con `BuilderError`. Si se actualiza una, revisar la otra.
+- **Las peticiones a la API de Wikipedia llevan un `User-Agent`
+  descriptivo**: su política de uso responde 403 a quien no lo mande.
 
 ## Estilo
 

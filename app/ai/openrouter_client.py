@@ -34,6 +34,23 @@ class AllModelsFailedError(RuntimeError):
     """Ninguno de los modelos configurados pudo responder."""
 
 
+class ChatReply(str):
+    """El texto de la respuesta, más el modelo que la generó.
+
+    Se comporta como un `str` normal (nada de lo que ya compara o usa el
+    resultado de `chat()` como texto se rompe), pero además expone
+    `.model`, para que quien llama pueda excluir ese modelo si resulta que
+    su respuesta no sirve (por ejemplo, un modelo que no es de chat de
+    verdad y nunca respeta el formato que se le pide) sin arriesgarse a
+    volver a toparse con el mismo modelo en un reintento.
+    """
+
+    def __new__(cls, content: str, model: str) -> "ChatReply":
+        obj = super().__new__(cls, content)
+        obj.model = model
+        return obj
+
+
 class OpenRouterClient:
     def __init__(
         self,
@@ -80,13 +97,21 @@ class OpenRouterClient:
         candidates.extend(m for m in discovered if m not in ya_incluidos)
         return candidates
 
-    async def chat(self, messages: list[dict], temperature: float = 0.4) -> str:
+    async def chat(
+        self,
+        messages: list[dict],
+        temperature: float = 0.4,
+        exclude_models: frozenset[str] = frozenset(),
+    ) -> str:
         """Envía la conversación al primer modelo disponible y devuelve el texto.
 
-        Recorre los modelos candidatos en orden hasta obtener una respuesta válida.
+        Recorre los modelos candidatos en orden hasta obtener una respuesta
+        válida. `exclude_models` permite saltarse modelos que quien llama ya
+        sabe que no sirvieron (por ejemplo, en un reintento tras una
+        respuesta inválida), para no volver a toparse con ellos.
         """
         last_error: Exception | None = None
-        models = await self._candidate_models()
+        models = [m for m in await self._candidate_models() if m not in exclude_models]
 
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             for model in models:
@@ -113,7 +138,7 @@ class OpenRouterClient:
                     content = choice.get("message", {}).get("content")
                     if content:
                         logger.debug("Respuesta obtenida del modelo %s", model)
-                        return content
+                        return ChatReply(content, model)
                     logger.warning("Modelo %s devolvió una respuesta vacía", model)
                     last_error = RuntimeError(f"Respuesta vacía de {model}")
                     continue

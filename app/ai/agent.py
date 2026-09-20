@@ -185,12 +185,18 @@ class ResearchAgent:
         messages.append({"role": "user", "content": user_message})
 
         reintentos_formato = 0
+        # Si un modelo no respeta el formato, no tiene sentido darle una
+        # segunda oportunidad a él mismo: probablemente ni siquiera sea un
+        # modelo de chat real. Se excluye para que el reintento use otro.
+        modelos_excluidos: set[str] = set()
 
         for step in range(self._max_steps):
             # Si ningún modelo responde se propaga AllModelsFailedError: quien
             # llama necesita distinguir un fallo nuestro de una respuesta real
             # (por ejemplo, para no gastarle la cuota al usuario).
-            raw_reply = await self._client.chat(messages)
+            raw_reply = await self._client.chat(
+                messages, exclude_models=frozenset(modelos_excluidos)
+            )
 
             try:
                 action = _extract_json(raw_reply)
@@ -198,9 +204,16 @@ class ResearchAgent:
                 # Los modelos gratuitos se salen del formato con cierta
                 # frecuencia. Antes de rendirse, se les señala el error: casi
                 # siempre lo corrigen al segundo intento.
+                modelo = getattr(raw_reply, "model", None)
+                if modelo:
+                    modelos_excluidos.add(modelo)
+
                 if reintentos_formato < MAX_REINTENTOS_FORMATO:
                     reintentos_formato += 1
-                    logger.info("El modelo no respondió en JSON, se le pide corregirlo")
+                    logger.info(
+                        "El modelo %s no respondió en JSON, se le pide corregirlo a otro",
+                        modelo or "?",
+                    )
                     messages.append({"role": "assistant", "content": raw_reply})
                     messages.append({"role": "user", "content": RECORDATORIO_FORMATO})
                     continue

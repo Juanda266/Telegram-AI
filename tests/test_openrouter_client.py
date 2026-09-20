@@ -47,6 +47,41 @@ async def test_usa_el_primer_modelo_que_responde(patch_async_client):
 
 
 @pytest.mark.asyncio
+async def test_chat_devuelve_el_modelo_que_respondio(patch_async_client):
+    """Quien llama necesita saber qué modelo contestó para poder excluirlo
+    en un reintento si esa respuesta resulta no servir."""
+    patch_async_client(lambda request: _ok("respuesta"))
+    client = OpenRouterClient("key", ["modelo-a", "modelo-b"])
+
+    result = await client.chat([{"role": "user", "content": "hola"}])
+
+    assert result.model == "modelo-a"
+
+
+@pytest.mark.asyncio
+async def test_exclude_models_salta_al_siguiente_modelo(patch_async_client):
+    used_models = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        import json
+
+        model = json.loads(request.content)["model"]
+        used_models.append(model)
+        return _ok("respuesta")
+
+    patch_async_client(responder)
+    client = OpenRouterClient("key", ["modelo-a", "modelo-b"])
+
+    result = await client.chat(
+        [{"role": "user", "content": "hola"}],
+        exclude_models=frozenset({"modelo-a"}),
+    )
+
+    assert result.model == "modelo-b"
+    assert used_models == ["modelo-b"]
+
+
+@pytest.mark.asyncio
 async def test_cambia_de_modelo_cuando_se_agota_la_cuota(patch_async_client):
     used_models = []
 
